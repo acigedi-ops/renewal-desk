@@ -10,7 +10,7 @@
   // No SPA fallback: the app is a single page at "/", so /api/* never matches a file and reaches the Worker.
   "assets": {"directory": "./dist", "binding": "ASSETS"},
   "vars": {
-    "GMAIL_USER": "kaplunlicensing@gmail.com",
+    "GMAIL_USER": "eduard@rhino.insure",
     "FROM_NAME": "Eduard Kaplun",
     "SUPABASE_URL": "https://dapyzgcpzivaiiousifb.supabase.co",
     "SUPABASE_KEY": "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"
@@ -19,7 +19,7 @@
   // GMAIL_APP_PASSWORD secret, so it can't send mail, and it can only read data with a signed-in user's session.
   "previews": {
     "vars": {
-      "GMAIL_USER": "kaplunlicensing@gmail.com",
+      "GMAIL_USER": "eduard@rhino.insure",
       "FROM_NAME": "Eduard Kaplun",
       "SUPABASE_URL": "https://dapyzgcpzivaiiousifb.supabase.co",
       "SUPABASE_KEY": "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"

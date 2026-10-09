@@ -16,7 +16,19 @@ const hdr = s => ascii(s) ? s : `=?UTF-8?B?${b64(enc.encode(s))}?=`;
 const addr = a => String(a).trim();
 const fname = s => String(s || "file.pdf").replace(/["\\\r\n]/g, "");
 
-/** msg: {from, fromName, to[], cc[], subject, body, attachments: [{filename, contentType, bytes}]} -> CRLF string */
+const textPart = (type, s) => [`Content-Type: ${type}; charset=UTF-8`, "Content-Transfer-Encoding: base64", "",
+  wrap76(b64(enc.encode(String(s || "").replace(/\r?\n/g, "\r\n")))).trimEnd()];
+// Plain text only, or plain text + HTML as multipart/alternative when msg.html is given.
+function textParts(msg){
+  if (!msg.html) return textPart("text/plain", msg.body);
+  const alt = "rd-alt-" + crypto.randomUUID();
+  return [`Content-Type: multipart/alternative; boundary="${alt}"`, "",
+    `--${alt}`, ...textPart("text/plain", msg.body),
+    `--${alt}`, ...textPart("text/html", msg.html),
+    `--${alt}--`];
+}
+
+/** msg: {from, fromName, to[], cc[], subject, body, html?, attachments: [{filename, contentType, bytes}]} -> CRLF string */
 export function buildMime(msg){
   const boundary = "rd-" + crypto.randomUUID();
   const domain = msg.from.split("@")[1] || "localhost";
@@ -31,10 +43,7 @@ export function buildMime(msg){
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     "",
     `--${boundary}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    wrap76(b64(enc.encode(String(msg.body || "").replace(/\r?\n/g, "\r\n")))).trimEnd(),
+    ...textParts(msg),
   ];
   for (const a of msg.attachments || []){
     const n = fname(a.filename);

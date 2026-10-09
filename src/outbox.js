@@ -6,7 +6,7 @@
 //    created_at, created_by: "site"|"routine", source, sent_at, error}
 (() => {
   const LNI_TO = "tukwila@lni.wa.gov";
-  const SIGNATURE = "--\nEduard Kaplun\nFounder\nKaplun Licensing LLC\n(253)-335-9649\nKaplunlicensing@gmail.com\nKaplunlicensing.com";
+  const SIGNATURE = "--\nEduard Kaplun\nFounder\nRhino Insurance Group LLC\n(253)-335-9649\nEduard@rhino.insure\nrhinoinsuranceco.com";
   const q = s => document.querySelector(s);
   document.head.insertAdjacentHTML("beforeend", `<style>.bar .tabs{overflow-x:auto;max-width:100%;scrollbar-width:none}.bar .tabs button{white-space:nowrap}</style>`);
   const h = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -24,8 +24,8 @@
     },
     welcome(c){
       const first = String(c.contact?.name || "").trim().split(/\s+/)[0];
-      return {to: list(c.contact?.email), cc: [], subject: `Welcome to Kaplun Licensing - ${c.name}`,
-        body: `Hi ${first || "there"},\n\nWelcome to Kaplun Licensing, and thank you for trusting us with ${c.name}! Your documents are attached:\n\n` +
+      return {to: list(c.contact?.email), cc: [], subject: `Welcome to Rhino Insurance Group - ${c.name}`,
+        body: `Hi ${first || "there"},\n\nWelcome to Rhino Insurance Group, and thank you for trusting us with ${c.name}! Your documents are attached:\n\n` +
           `- Certificate of insurance (liability)\n- Contractor bond\n\nPlease keep them for your records. We keep an eye on your L&I registration, insurance and bond, and we will reach out before anything renews. ` +
           `If you need a certificate for a job or have any questions, just reply to this email or call us.\n\nThank you,\n\n${SIGNATURE}`};
     }
@@ -62,7 +62,7 @@
     if (main.hidden) return;
     if (main.contains(document.activeElement) && document.activeElement.matches("input,textarea")) return; // don't wipe typing
     main.innerHTML = `
-      <div class="section-h"><h2>Waiting for you</h2><span class="notice">Edit anything, then tap Approve &amp; send. It goes out from kaplunlicensing@gmail.com.</span></div>
+      <div class="section-h"><h2>Waiting for you</h2><span class="notice">Edit anything, then tap Approve &amp; send. It goes out from Eduard@rhino.insure.</span></div>
       ${open.length ? `<div class="list">${open.map(card).join("")}</div>` : `<div class="empty">Nothing waiting. New bond emails appear here when you upload a bond on a client card, and welcome emails when a new policy or bond is issued.</div>`}
       ${sent.length ? `<div class="section-h"><h2>Sent</h2></div><div class="list">${sent.map(x => `<div class="mail"><span class="s">${h(x.subject)}</span>
         <span class="notice">To ${h(list(x.to).join(", "))} · sent ${when(x.sent_at)}${(x.attachments || []).length ? ` · ${(x.attachments || []).length} attachment${x.attachments.length > 1 ? "s" : ""}` : ""}</span></div>`).join("")}</div>` : ""}`;

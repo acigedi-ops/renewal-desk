@@ -4,6 +4,7 @@
 // read with that user's own token, so it can't be used as an open mail relay.
 import {connect} from "cloudflare:sockets";
 import {buildMime, smtpSend} from "./mail.js";
+import {bodyHtml} from "./signature.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json", "Cache-Control": "no-store"}});
 
@@ -59,7 +60,7 @@ async function send(request, env){
       attachments.push({filename: a.file || path.split("/").pop(), contentType: r.headers.get("Content-Type") || "application/pdf", bytes: new Uint8Array(await r.arrayBuffer())});
     }
     const from = env.GMAIL_USER;
-    const data = buildMime({from, fromName: env.FROM_NAME, to, cc, subject: item.subject, body: item.body, attachments});
+    const data = buildMime({from, fromName: env.FROM_NAME, to, cc, subject: item.subject, body: item.body, html: bodyHtml(item.body), attachments});
     const socket = connect({hostname: "smtp.gmail.com", port: 465}, {secureTransport: "on"});
     const result = await smtpSend(socket, {user: from, pass: env.GMAIL_APP_PASSWORD.replace(/\s+/g, ""), from, rcpts: [...to, ...cc], data});
     const sent = {status: "sent", sent_at: new Date().toISOString(), sent_by: who.user?.email || "", smtp: result.slice(0, 200), error: ""};

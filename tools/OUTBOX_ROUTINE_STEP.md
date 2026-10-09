@@ -2,7 +2,7 @@
 
 Add this to the twice-daily L&I + email routine, after the Gmail scan. It only **queues** emails in the site's
 Outbox (collection `outbox`). Nothing is sent from the routine: Eduard edits and taps "Approve & send" on the
-site, and the Worker at `/api/outbox/send` sends it from kaplunlicensing@gmail.com.
+site, and the Worker at `/api/outbox/send` sends it from eduard@rhino.insure.
 
 ---
 
