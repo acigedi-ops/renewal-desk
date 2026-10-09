@@ -2,7 +2,15 @@
 // db -> Supabase table `docs`, assets -> private Storage bucket `cois`, downloads -> a normal browser download.
 (() => {
   const cfg = window.RD_CONFIG || {};
-  const sb = window.supabase.createClient(cfg.url, cfg.key, {auth: {persistSession: true, autoRefreshToken: true}});
+  const sb = window.supabase.createClient(cfg.url, cfg.key, {
+    // Stay signed in: keep the session in localStorage (kept by iOS home-screen apps) and renew it in the background.
+    auth: {persistSession: true, autoRefreshToken: true, storage: window.localStorage, storageKey: "rhino-renewal-desk-auth"}
+  });
+  // Phones pause background timers, so renew the session as soon as the app comes back to the front.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible"){ sb.auth.startAutoRefresh(); sb.auth.getSession(); }
+    else sb.auth.stopAutoRefresh();
+  });
   window.rdSupabase = sb;
 
   // ---- Sign in ----

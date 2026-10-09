@@ -12,6 +12,8 @@ const head = `<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#0E6655">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Renewals">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg">
