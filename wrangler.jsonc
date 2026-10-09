@@ -14,5 +14,15 @@
     "FROM_NAME": "Eduard Kaplun",
     "SUPABASE_URL": "https://dapyzgcpzivaiiousifb.supabase.co",
     "SUPABASE_KEY": "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"
+  },
+  // Branch/PR builds run `wrangler preview`, which requires its own vars. Same public values: a preview has no
+  // GMAIL_APP_PASSWORD secret, so it can't send mail, and it can only read data with a signed-in user's session.
+  "previews": {
+    "vars": {
+      "GMAIL_USER": "kaplunlicensing@gmail.com",
+      "FROM_NAME": "Eduard Kaplun",
+      "SUPABASE_URL": "https://dapyzgcpzivaiiousifb.supabase.co",
+      "SUPABASE_KEY": "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"
+    }
   }
 }
