@@ -36,3 +36,12 @@ cpSync("src/shim.js", "dist/shim.js");
 cpSync("src/outbox.js", "dist/outbox.js");
 writeFileSync("dist/index.html", html);
 console.log("built dist/index.html", html.length, "bytes");
+
+// GMAIL_APP_PASSWORD lives in the dashboard's Build "Variables and secrets", which only the build can read.
+// On main, copy it into the Worker's own secrets so /api/outbox/send can use it. The value goes over stdin, never into logs or dist/.
+if (process.env.WORKERS_CI_BRANCH === "main" && process.env.GMAIL_APP_PASSWORD){
+  const {spawnSync} = await import("node:child_process");
+  const r = spawnSync("npx", ["--yes", "wrangler", "secret", "put", "GMAIL_APP_PASSWORD"],
+    {input: process.env.GMAIL_APP_PASSWORD.replace(/\s+/g, ""), stdio: ["pipe", "inherit", "inherit"], timeout: 120000});
+  console.log(r.status === 0 ? "copied GMAIL_APP_PASSWORD to the Worker" : `could not copy GMAIL_APP_PASSWORD (exit ${r.status}); emails will say Gmail isn't connected`);
+}
