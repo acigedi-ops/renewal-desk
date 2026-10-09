@@ -1,11 +1,11 @@
 # Rhino Renewal Desk, standalone site
 
-The same app as the claude.ai artifact, hosted on Cloudflare Pages (free, commercial use allowed) with a Supabase database and login.
+The same app as the claude.ai artifact, hosted on Cloudflare (free, commercial use allowed) with a Supabase database and login.
 
 ## How it fits together
 - `src/app.html` is a copy of `/mnt/project-files/lni-renewals/app.html` (owned by the "L&I and bond renewal tracker" thread). It runs unchanged.
 - `src/shim.js` provides `window.claude.use("db" | "assets" | "downloads")` on top of Supabase, and shows the sign-in screen.
-- `build.mjs` wraps app.html in a full page and writes `dist/`. Cloudflare Pages runs it on every push to main (build command `node build.mjs`, output directory `dist`). Response headers are in `public/_headers`.
+- `build.mjs` wraps app.html in a full page and writes `dist/`. Cloudflare runs it on every push to main (build command `node build.mjs`, output directory `dist`). Response headers are in `public/_headers`.
 - `public/config.js` holds the Supabase project URL and publishable key (public by design).
 - `supabase/schema.sql` creates table `docs(collection, id, data jsonb)`, the `merge_doc` function, realtime, and the private `cois` bucket. Only signed-in users can read or write.
 
@@ -14,11 +14,12 @@ The same app as the claude.ai artifact, hosted on Cloudflare Pages (free, commer
 COI PDFs live in bucket `cois` at `<asset_id>/<file>`; `cois[].url` is `/coi/<asset_id>/<file>` and the shim swaps it for a signed URL.
 
 ## Updating the app
-After app.html changes: copy it to `src/app.html`, commit, push. Cloudflare Pages redeploys.
+After app.html changes: copy it to `src/app.html`, commit, push. Cloudflare redeploys.
 
 ## Scripts and routines
-`tools/rd.py` reads and writes the database from a cloud session. The Supabase secret key is a network secret on the
-"lni" environment (header `apikey` for the project host), so nothing secret is in this repo or in arguments.
+`tools/rd.py` reads and writes the database from a cloud session. The Supabase secret key is the SUPABASE_SECRET_KEY
+environment variable on the "lni" environment (rd.py strips a stray "SUPABASE_SECRET_KEY=" prefix and sends it only as the
+`apikey` header), so nothing secret is in this repo or in arguments. Only sessions started on "lni" have it.
 
 Routine changes at switch-over (artifact db -> Supabase):
 - Twice-daily L&I routine: replace ArtifactData writes of `clients/<id>.lni`, `meta/status` and `todo/*` with

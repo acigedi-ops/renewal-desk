@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Read and write the Renewal Desk database (Supabase) from scripts and routines.
 
-The Supabase secret key is never in this file or its arguments: the cloud environment's network
-secret adds the `apikey` header to every request to the project host.
+The Supabase secret key is never in this file or its arguments: it comes from the SUPABASE_SECRET_KEY
+environment variable of the "lni" cloud environment (sessions started after 2026-10-09 20:24 UTC have it).
+It is sent only as the `apikey` header; Supabase fills in Authorization itself.
 
   rd.py list COLLECTION [--out DIR]       print docs as JSON lines, or save DIR/<collection>/<id>.json
   rd.py get COLLECTION ID
@@ -27,8 +28,17 @@ def base_url():
     return url.rstrip("/")
 
 
+def api_key():
+    k = os.environ.get("SUPABASE_SECRET_KEY", "").strip()
+    # The saved value carries a literal "SUPABASE_SECRET_KEY=" prefix; drop it.
+    k = k.removeprefix("SUPABASE_SECRET_KEY=").strip()
+    if not k:
+        raise SystemExit("SUPABASE_SECRET_KEY is not set: run this in a session on the lni environment")
+    return k
+
+
 def _req(method, path, body=None, headers=None, raw=None):
-    h = {"Content-Type": "application/json", **(headers or {})}
+    h = {"Content-Type": "application/json", "apikey": api_key(), **(headers or {})}
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
     req = urllib.request.Request(base_url() + path, data=data, method=method, headers=h)
     try:
