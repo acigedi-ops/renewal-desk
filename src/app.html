@@ -1,0 +1,819 @@
+<title>Rhino Renewal Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column worklist, urgent first; client opens in a full-height sheet. Permit-green accent, hi-vis amber for "coming due". */
+:root{
+  --bg:#EEF0EC; --surface:#FFFFFF; --sunk:#E3E7E2; --ink:#18211E; --muted:#5B6863; --line:#D3D9D4;
+  --accent:#0E6655; --accent-ink:#FFFFFF; --accent-soft:#D6EBE4;
+  --red:#B42318; --red-soft:#FBE4E1; --amber:#9A6200; --amber-soft:#FCEFCF; --ok:#2B7A4B; --ok-soft:#DDF0E3;
+  --display:"Archivo","Helvetica Neue",Arial,sans-serif; --body:"IBM Plex Sans",system-ui,-apple-system,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101614; --surface:#18201D; --sunk:#0B100E; --ink:#E6ECE9; --muted:#9AA8A2; --line:#2A3531;
+  --accent:#4FC2A6; --accent-ink:#06231C; --accent-soft:#163A31;
+  --red:#FF8A7A; --red-soft:#3A1A16; --amber:#F2C14E; --amber-soft:#3A2E10; --ok:#6FD39A; --ok-soft:#14321F; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101614; --surface:#18201D; --sunk:#0B100E; --ink:#E6ECE9; --muted:#9AA8A2; --line:#2A3531;
+  --accent:#4FC2A6; --accent-ink:#06231C; --accent-soft:#163A31;
+  --red:#FF8A7A; --red-soft:#3A1A16; --amber:#F2C14E; --amber-soft:#3A2E10; --ok:#6FD39A; --ok-soft:#14321F; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);padding-inline:16px;padding-block:0 40px}
+.wrap{max-width:880px;margin:0 auto}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:14px 10px;display:grid;gap:10px}
+.brand{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand h1{font-size:22px;font-weight:800;letter-spacing:-.01em}
+.brand .sub{color:var(--muted);font-size:12.5px}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;text-align:left;display:grid;gap:0}
+.tile b{font-family:var(--display);font-size:24px;line-height:1.1}
+.tile span{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.tile.red b{color:var(--red)} .tile.amber b{color:var(--amber)} .tile.ok b{color:var(--ok)}
+.tile[aria-pressed="true"]{border-color:var(--ink)}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bar .search{min-width:160px}
+.tabs{display:flex;background:var(--sunk);border-radius:999px;padding:3px;gap:2px}
+.tabs button{border:0;background:none;padding:6px 12px;border-radius:999px;font-weight:600;font-size:13.5px;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0 / .08)}
+.search{flex:1;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:7px 14px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 12px;font-weight:600;font-size:13.5px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.ghost{border-color:transparent;background:none;color:var(--accent);padding-inline:6px}
+.list{display:grid;gap:8px;margin-top:6px}
+.row{display:grid;grid-template-columns:6px 1fr auto;gap:12px;align-items:stretch;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:0;text-align:left;width:100%;overflow:hidden}
+.row .sev{background:var(--ok)} .row.s2 .sev{background:var(--red)} .row.s1 .sev{background:var(--amber)}
+.row .main{padding:10px 0;min-width:0;display:grid;gap:3px}
+.row .name{font-weight:600;overflow-wrap:anywhere}
+.row .meta{font-size:12.5px;color:var(--muted)}
+.row .why{font-size:13px;display:flex;flex-wrap:wrap;gap:4px 6px}
+.row .dates{padding:10px 12px 10px 0;display:grid;gap:2px;align-content:center;text-align:right;font-size:12px;color:var(--muted)}
+.row .dates b{color:var(--ink);font-weight:500}
+.chip{display:inline-block;border-radius:6px;padding:1px 7px;font-size:12px;font-weight:600;white-space:nowrap}
+.chip.red{background:var(--red-soft);color:var(--red)} .chip.amber{background:var(--amber-soft);color:var(--amber)} .chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.info{background:var(--accent-soft);color:var(--accent)} .chip.plain{background:var(--sunk);color:var(--muted)}
+.section-h{display:flex;justify-content:space-between;align-items:baseline;margin-top:18px;gap:8px}
+.section-h h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.call{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:start}
+.call .left{display:grid;justify-items:center;align-content:start;min-width:64px;padding:6px 8px;border-radius:8px;background:var(--amber-soft);color:var(--amber)}
+.call .left.red{background:var(--red-soft);color:var(--red)}
+.call .left b{font-family:var(--display);font-size:22px;line-height:1.1}
+.call .left span{font-size:11px;text-transform:uppercase;letter-spacing:.05em;text-align:center}
+.call .body{display:grid;gap:4px;min-width:0}
+.call .name{font-weight:600;overflow-wrap:anywhere}
+.call .why{display:flex;flex-wrap:wrap;gap:4px 6px}
+.call .actions{grid-column:1/-1}
+.empty{border:1px dashed var(--line);border-radius:var(--r);padding:18px;color:var(--muted);text-align:center;margin-top:8px}
+.foot{color:var(--muted);font-size:12px;margin-top:22px}
+/* sheet */
+.sheet{position:fixed;inset:0;z-index:20;background:rgb(0 0 0 / .35);display:flex;justify-content:flex-end}
+.panel{background:var(--bg);width:min(560px,100%);height:100%;overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 14px) 16px calc(env(safe-area-inset-bottom,0px) + 40px);display:grid;gap:14px;align-content:start}
+.panel-h{display:flex;justify-content:space-between;gap:10px;align-items:start}
+.panel-h h2{font-size:21px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;display:grid;gap:8px;min-width:0}
+.card h3{font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.card h3 span{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-width:0}
+.form textarea{resize:vertical}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:13.5px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;overflow-wrap:anywhere}
+.lni{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.lni .box{border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:grid;gap:2px;font-size:13px;min-width:0}
+.lni .box .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+.lni .box.red{border-color:var(--red);background:var(--red-soft)} .lni .box.amber{border-color:var(--amber);background:var(--amber-soft)}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.form label{display:grid;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.form input,.form select,.form textarea{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:7px 9px;font-size:14px;color:var(--ink);width:100%;min-width:0}
+.form .full{grid-column:1/-1}
+.actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.pol{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.pol:first-of-type{border-top:0}
+.note{font-size:13.5px;border-left:2px solid var(--line);padding-left:10px}
+.note time{display:block;font-size:11.5px;color:var(--muted)}
+.notice{font-size:12.5px;color:var(--muted)}
+.mail{display:grid;gap:3px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.mail .s{font-weight:600}
+a{color:var(--accent)}
+@media (max-width:520px){.row .dates{display:none}.brand .sub{width:100%}}
+@media (prefers-reduced-motion:no-preference){.panel{animation:slide .18s ease-out}@keyframes slide{from{transform:translateX(24px);opacity:.6}}}
+/* mode switch + SOS mode */
+.modes{display:flex;justify-content:center;padding-top:calc(env(safe-area-inset-top,0px) + 10px)}
+.modes .tabs{width:100%;max-width:360px}
+.modes .tabs button{flex:1}
+.sos-tiles{grid-template-columns:repeat(4,1fr)}
+@media (max-width:520px){.sos-tiles{grid-template-columns:repeat(2,1fr)}}
+.row.sos-plain .sev{background:var(--line)}
+</style>
+
+<div class="wrap">
+  <nav class="modes" aria-label="Mode"><div class="tabs" role="tablist"><button role="tab" data-mode="policies" aria-selected="true">Policies</button><button role="tab" data-mode="sos" aria-selected="false">SOS status</button></div></nav>
+  <div id="policyMode">
+  <header class="top">
+    <div class="brand"><h1>Rhino Renewal Desk</h1><span class="sub" id="checked">Commercial policies, L&amp;I insurance and bonds</span></div>
+    <div class="tiles" id="tiles">
+      <button class="tile red" data-f="2" aria-pressed="false"><b id="n2">–</b><span>Action now</span></button>
+      <button class="tile amber" data-f="1" aria-pressed="false"><b id="n1">–</b><span>Due in 60 days</span></button>
+      <button class="tile ok" data-f="0" aria-pressed="false"><b id="n0">–</b><span>In good standing</span></button>
+    </div>
+    <div class="bar">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tab-today" aria-selected="true">Today <span id="todayN"></span></button>
+        <button role="tab" id="tab-desk" aria-selected="false">Renewals</button>
+        <button role="tab" id="tab-todo" aria-selected="false">L&amp;I to do <span id="todoN"></span></button>
+        <button role="tab" id="tab-inbox" aria-selected="false">Inbox <span id="inboxN"></span></button>
+      </div>
+      <input class="search" id="q" type="search" placeholder="Search client, license, UBI" aria-label="Search clients">
+      <button class="btn" id="agencyBtn" title="Agency details for certificates">Agency</button><button class="btn primary" id="addBtn" title="Add client">+ Client</button>
+    </div>
+  </header>
+
+  <main id="today"></main>
+  <main id="desk" hidden></main>
+  <main id="todo" hidden></main>
+  <main id="inbox" hidden></main>
+  <p class="foot" id="foot">L&amp;I data comes from Washington L&amp;I's public contractor records and is refreshed at 8:50am and 5:50pm Pacific. Your notes, contacts and other policies are saved here.</p>
+  </div>
+  <div id="sosMode" hidden></div>
+</div>
+
+<div class="sheet" id="sheet" hidden><div class="panel" id="panel" role="dialog" aria-modal="true"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const WARN = 60, URGENT = 7;
+let assets = null, agency = {}, dl = null, db = null, clients = [], meta = {}, filter = null, openId = null, canWrite = true, todos = [];
+const DEAD = new Set(["Canceled","Cancelled","Expired"]);
+
+function today(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function pd(s){ if(!s || s === "until cancelled") return null; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m ? new Date(+m[1], m[2]-1, +m[3]) : null; }
+function days(s){ const d = pd(s); return d ? Math.round((d - today()) / 864e5) : null; }
+function fd(s){ if(!s) return "—"; if(s === "until cancelled") return "Until cancelled"; const d = pd(s); return d ? d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : s; }
+function rel(n){ return n == null ? "" : n < 0 ? `${-n}d ago` : n === 0 ? "today" : `in ${n}d`; }
+function docId(lic){ return lic.trim().toUpperCase().replace(/[^A-Z0-9_\-.~:@+]/g, "_"); }
+
+// Work out what needs attention for one client, from L&I data plus policies tracked here.
+function assess(c){
+  const out = [], lni = c.lni || {}, reg = lni.registration || {};
+  const push = (lvl, text, kind) => out.push({lvl, text, kind});
+  if (lni.checked_at){
+    if (reg.status && reg.status !== "ACTIVE") push(2, `Registration ${reg.status.toLowerCase()}${reg.suspended && reg.status==="SUSPENDED" ? " since " + fd(reg.suspended) : ""}`, "reg");
+    else { const n = days(reg.expires); if (n != null && n <= WARN) push(n <= URGENT ? 2 : 1, `Registration renews ${rel(n)}`, "reg"); }
+    const active = !reg.status || reg.status === "ACTIVE";
+    for (const [k, label] of [["insurance","Liability"],["bond","Bond"]]){
+      const x = lni[k];
+      if (!x || !x.until){ if (active) push(2, `No ${label.toLowerCase()} on file with L&I`, k); continue; }
+      const n = days(x.until);
+      if (x.cancel && n != null && n <= WARN) push(n <= URGENT ? 2 : 1, `${label} cancelling ${rel(n)}`, k);
+      else if (n != null && n <= WARN) push(n <= URGENT ? 2 : 1, `${label} expires ${rel(n)}`, k);
+    }
+  }
+  const pols = c.policies || [];
+  for (const p of pols){
+    if (DEAD.has(p.status)) continue;
+    const n = days(p.expiration);
+    // a lapsed term that has already been replaced by a newer one of the same type is history, not a warning
+    if (n != null && n < 0 && pols.some(q => q !== p && q.type === p.type && !DEAD.has(q.status) && (q.status === "Active" || (days(q.expiration) ?? -1) >= 0))) continue;
+    if (n != null && n <= WARN) push(n <= URGENT ? 2 : 1, `${p.type || "Policy"} ${n < 0 ? "lapsed " : "expires "}${rel(n)}`, "pol");
+  }
+  const lvl = out.reduce((m, x) => Math.max(m, x.lvl), 0);
+  return {lvl, items: out, coi: coiStatus(c)};
+}
+
+// Is there a COI on file for the liability policy L&I currently shows?
+function coiStatus(c){
+  const ins = c.lni?.insurance, cois = c.cois || [];
+  const live = cois.filter(x => { const n = days(x.expiration); return n == null || n >= 0; });
+  if (!ins) return live.length ? "ok" : "none";
+  const num = (ins.number || "").replace(/\W/g, "").toUpperCase();
+  return live.some(x => (x.policy || "").replace(/\W/g, "").toUpperCase().includes(num) && num) ? "ok" : live.length ? "other" : "none";
+}
+
+function render(){
+  renderToday();
+  const q = $("#q").value.trim().toLowerCase();
+  const rows = clients.map(c => ({c, a: assess(c)}));
+  const counts = [0,0,0]; rows.forEach(r => counts[r.a.lvl]++);
+  [0,1,2].forEach(i => $("#n"+i).textContent = clients.length ? counts[i] : "0");
+  document.querySelectorAll(".tile").forEach(t => t.setAttribute("aria-pressed", String(filter === +t.dataset.f)));
+  const ck = meta.checked_at ? new Date(meta.checked_at) : null;
+  $("#checked").textContent = ck ? `L&I checked ${ck.toLocaleString("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"})}` : "Waiting for the first L&I check";
+  const inboxItems = meta.inbox || [];
+  $("#inboxN").textContent = inboxItems.length ? `(${inboxItems.length})` : "";
+
+  let vis = rows.filter(r => (filter == null || r.a.lvl === filter) &&
+    (!q || [r.c.name, r.c.license, r.c.ubi, r.c.contact?.name].some(v => String(v||"").toLowerCase().includes(q))));
+  const soon = r => { const ds = r.a.items.map(i => i.text); return Math.min(...[r.c.lni?.insurance?.until, r.c.lni?.bond?.until, r.c.lni?.registration?.expires, ...(r.c.policies||[]).map(p=>p.expiration)].map(days).filter(n => n != null), 99999); };
+  vis.sort((a, b) => b.a.lvl - a.a.lvl || soon(a) - soon(b) || a.c.name.localeCompare(b.c.name));
+
+  const desk = $("#desk");
+  if (!clients.length){
+    desk.innerHTML = `<div class="empty">Your clients will appear here after the first L&amp;I check. Add one with <b>+ Client</b> using their L&amp;I license number.</div>`;
+    return;
+  }
+  const groups = [[2,"Action now"],[1,"Coming due"],[0,"In good standing"]];
+  desk.innerHTML = groups.map(([lvl, title]) => {
+    const g = vis.filter(r => r.a.lvl === lvl);
+    if (!g.length) return "";
+    return `<div class="section-h"><h2>${title}</h2><span class="notice">${g.length}</span></div><div class="list">${g.map(rowHtml).join("")}</div>`;
+  }).join("") || `<div class="empty">No clients match.</div>`;
+}
+
+function rowHtml({c, a}){
+  const l = c.lni || {}, fu = c.followup?.status;
+  const why = a.items.length ? a.items.map(i => `<span class="chip ${i.lvl===2?"red":"amber"}">${esc(i.text)}</span>`).join("") : `<span class="chip ok">All on file</span>`;
+  return `<button class="row s${a.lvl}" data-id="${esc(c.id)}"><span class="sev"></span>
+    <span class="main"><span class="name">${esc(c.name)}</span>
+      <span class="meta mono">${esc(c.license)}${c.contact?.name ? " · " + esc(c.contact.name) : ""}</span>
+      <span class="why">${why}${a.coi === "none" && c.lni?.insurance ? `<span class="chip plain">No COI on file</span>` : ""}${fu ? `<span class="chip info">${esc(fu)}</span>` : ""}</span></span>
+    <span class="dates mono"><span>Liability <b>${fd(l.insurance?.until)}</b></span><span>Bond <b>${fd(l.bond?.until)}</b></span><span>License <b>${fd(l.registration?.expires)}</b></span></span>
+  </button>`;
+}
+
+// L&I to do: policies the app shows that L&I has missing or wrong. Built at every L&I check;
+// an item disappears on its own once L&I's records match.
+const SEV = {urgent: ["Fix now", "red"], fix: ["Fix at L&I", "amber"], minor: ["Small differences", "plain"]};
+function todoCard(t){
+  const c = t.correct || {}, l = t.lni || [];
+  const lrows = l.length ? l.map(r => `<span class="mono">${esc(r.number)}</span><br><span class="notice">${esc(r.carrier || "")}${r.carrier ? " · " : ""}${fd(r.effective)} to ${fd(r.expiration)}</span>`).join("<br>") : `<span class="notice">Nothing on file</span>`;
+  return `<div class="card">
+    <h3><button class="btn ghost" data-open="${esc(t.client_id)}" style="padding:0;font-size:15px;text-align:left">${esc(t.client)}</button>
+      <span>${t.due ? `<span class="chip ${days(t.due) <= 30 ? "red" : "plain"}">L&amp;I coverage ends ${fd(t.due)}</span>` : ""}<span class="chip ${SEV[t.severity][1]}">${esc(t.title)}</span></span></h3>
+    <span>${esc(t.detail)}</span>
+    <div class="lni">
+      <div class="box"><span class="lbl">Correct (portal / email)</span>${c.number ? `<span class="mono">${esc(c.number)}</span><span class="notice">${esc(c.carrier || "")}</span><span class="notice">${fd(c.effective)} to ${fd(c.expiration)}${c.status ? " · " + esc(c.status) : ""}</span>` : `<span class="notice">—</span>`}</div>
+      <div class="box"><span class="lbl">L&amp;I shows</span>${lrows}</div>
+    </div>
+    <div class="actions"><span class="notice mono">${esc(t.license)}</span>${t.done
+      ? `<span class="notice">Marked fixed ${t.done_at ? fd(t.done_at) : ""}. It clears when L&amp;I updates.</span><button class="btn" data-done="0" data-id="${esc(t.id)}">Undo</button>`
+      : `<button class="btn primary" data-done="1" data-id="${esc(t.id)}">Mark fixed</button>`}</div>
+  </div>`;
+}
+function renderTodo(){
+  const open = todos.filter(t => t.state !== "resolved");
+  const q = $("#q").value.trim().toLowerCase();
+  const vis = open.filter(t => !q || [t.client, t.license, t.correct?.number].some(v => String(v || "").toLowerCase().includes(q)));
+  const todoCount = open.filter(t => !t.done && t.severity !== "minor").length;
+  $("#todoN").textContent = todoCount ? `(${todoCount})` : "";
+  if (!open.length){ $("#todo").innerHTML = `<div class="empty">Nothing to fix. Every policy in the app matches what L&amp;I has on file.</div>`; return; }
+  const sorted = vis.slice().sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.client.localeCompare(b.client));
+  const group = (sev) => sorted.filter(t => !t.done && t.severity === sev);
+  const done = sorted.filter(t => t.done);
+  const sec = (title, list, note) => list.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${list.length}</span></div>${note ? `<p class="notice" style="margin:4px 0">${note}</p>` : ""}<div class="list">${list.map(todoCard).join("")}</div>` : "";
+  const minor = group("minor");
+  $("#todo").innerHTML =
+    `<p class="notice" style="margin:12px 0 0">Policies where L&amp;I's records don't match the app. The app uses your carrier portals and emails as the correct version. Rebuilt at every L&amp;I check.</p>` +
+    sec("Fix now: coverage at L&amp;I ends within 30 days", group("urgent")) +
+    sec("Fix at L&amp;I", group("fix")) +
+    (minor.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">Small differences (${minor.length}): a missing last digit or dates off by a day or two</summary><div class="list">${minor.map(todoCard).join("")}</div></details>` : "") +
+    sec("Marked fixed, waiting for L&amp;I to update", done) +
+    (vis.length ? "" : `<div class="empty">No items match.</div>`);
+}
+
+// Today: only the clients to call now, soonest L&I suspension first.
+const TODAY_WINDOW = 30;
+function callReasons(c){
+  const out = [], l = c.lni || {}, reg = l.registration || {};
+  const add = (n, text) => out.push({n, text});
+  if (!c.license || !l.checked_at) return out;
+  if (reg.status && reg.status !== "ACTIVE"){ const since = days(reg.suspended) ?? days(reg.expires); add(since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(reg.suspended || reg.expires) : ""}`); return out; }
+  const rn = days(reg.expires); if (rn != null && rn <= TODAY_WINDOW) add(rn, rn < 0 ? "Registration expired" : `Registration renews ${fd(reg.expires)}`);
+  for (const [k, label] of [["insurance", "Liability"], ["bond", "Bond"]]){
+    const x = l[k];
+    if (!x || !x.until){ add(0, `No ${label.toLowerCase()} on file with L&I`); continue; }
+    const cn = days(x.cancel), un = days(x.until);
+    if (cn != null && cn <= TODAY_WINDOW) add(cn, `${label} cancels ${fd(x.cancel)}`);
+    else if (un != null && un <= TODAY_WINDOW) add(un, `${label} ends ${fd(x.until)}`);
+  }
+  for (const t of todos) if (t.client_id === c.id && t.state !== "resolved" && !t.done && t.severity === "urgent"){
+    const n = days(t.due); add(n ?? 0, t.kind === "missing" ? "New policy not filed with L&I" : t.title); }
+  const nm = String(c.name || "").toLowerCase();
+  for (const m of meta.inbox || []){
+    const txt = `${m.subject} ${m.summary}`.toLowerCase();
+    if (m.client && nm && String(m.client).toLowerCase() === nm && /cancel|intent|lapse|past due|non-?pay/.test(txt)) add(null, "Cancellation notice in email");
+  }
+  return out;
+}
+function renderToday(){
+  const q = $("#q").value.trim().toLowerCase();
+  const rows = clients.map(c => {
+    const rs = callReasons(c); if (!rs.length) return null;
+    const ns = rs.map(r => r.n).filter(n => n != null);
+    return {c, rs, n: ns.length ? Math.min(...ns) : 0};
+  }).filter(Boolean);
+  const snoozed = r => days(r.c.followup?.date) > 0;
+  const byN = (a, b) => a.n - b.n || a.c.name.localeCompare(b.c.name);
+  const open = rows.filter(r => !snoozed(r));
+  const recent = open.filter(r => r.n < 0 && r.n >= -TODAY_WINDOW).sort((a, b) => b.n - a.n);
+  const due = open.filter(r => r.n >= 0).sort(byN);
+  const old = open.filter(r => r.n < -TODAY_WINDOW).sort((a, b) => b.n - a.n);
+  const later = rows.filter(snoozed).sort(byN);
+  const nCall = recent.length + due.length;
+  $("#todayN").textContent = nCall ? `(${nCall})` : "";
+  const match = r => !q || [r.c.name, r.c.license, r.c.contact?.name].some(v => String(v || "").toLowerCase().includes(q));
+  const card = r => {
+    const c = r.c, ph = c.contact?.phone, tel = String(ph || "").replace(/[^\d+]/g, "");
+    const big = r.n < 0 ? `<b>${-r.n}</b><span>days past</span>` : r.n === 0 ? `<b>Now</b><span>today</span>` : `<b>${r.n}</b><span>${r.n === 1 ? "day left" : "days left"}</span>`;
+    return `<div class="card call"><div class="left ${r.n <= 7 ? "red" : ""}">${big}</div>
+      <div class="body"><button class="btn ghost name" data-open="${esc(c.id)}" style="padding:0;text-align:left;font-size:15px">${esc(c.name)}</button>
+        <span class="notice">${c.contact?.name ? esc(c.contact.name) + " · " : ""}${ph ? `<a href="tel:${esc(tel)}">${esc(ph)}</a>` : "No phone saved"}${c.followup?.status ? " · " + esc(c.followup.status) : ""}</span>
+        <span class="why">${r.rs.map(x => `<span class="chip ${x.n != null && x.n <= 7 ? "red" : "amber"}">${esc(x.text)}</span>`).join("")}</span></div>
+      <div class="actions">${tel ? `<a class="btn" href="sms:${esc(tel)}">Text</a>` : ""}${snoozed(r) ? `<span class="notice">Next follow-up ${fd(c.followup.date)}</span><button class="btn" data-called="0" data-id="${esc(c.id)}">Back to today</button>` : `<button class="btn primary" data-called="1" data-id="${esc(c.id)}">Called, check back in 3 days</button>`}</div></div>`;
+  };
+  const vr = recent.filter(match), vd = due.filter(match), vo = old.filter(match), vl = later.filter(match);
+  const sec = (title, list) => list.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${list.length}</span></div><div class="list">${list.map(card).join("")}</div>` : "";
+  const fold = (title, list) => list.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">${title} (${list.length})</summary><div class="list">${list.map(card).join("")}</div></details>` : "";
+  $("#today").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
+    `<p class="notice" style="margin:12px 0 0">Who to call today: anyone whose L&amp;I liability, bond or registration ends or cancels within ${TODAY_WINDOW} days, or whose new policy isn't filed with L&amp;I yet. Soonest suspension first.</p>` +
+    sec("Lapsed in the last 30 days: call to reinstate", vr) +
+    sec("Call before L&amp;I suspends them", vd) +
+    (vr.length || vd.length ? "" : `<div class="empty">${nCall ? "No one matches." : "No calls needed today."}</div>`) +
+    fold("Already contacted", vl) +
+    fold("Lapsed more than 30 days ago", vo);
+}
+$("#today").addEventListener("click", async e => {
+  const b = e.target.closest("[data-called]");
+  if (b){ const c = clients.find(x => x.id === b.dataset.id); if (!c) return;
+    const d = new Date(); d.setDate(d.getDate() + 3);
+    const followup = b.dataset.called === "1" ? {status: "Contacted", date: d.toISOString().slice(0, 10)} : {...(c.followup || {}), date: ""};
+    b.disabled = true; if (!(await save(c, {followup}))) { b.disabled = false; b.textContent = "Could not save"; } return; }
+  const o = e.target.closest("[data-open]"); if (o) openClient(o.dataset.open);
+});
+
+function renderInbox(){
+  const items = meta.inbox || [];
+  $("#inbox").innerHTML = items.length
+    ? `<div class="section-h"><h2>Renewal emails since last check</h2></div><div class="list">${items.map(m => `<div class="mail">
+        <span class="notice">${esc(fd(m.date))} · ${esc(m.from || "")}${m.client ? " · " + esc(m.client) : ""}</span>
+        <span class="s">${esc(m.subject)}</span><span>${esc(m.summary || "")}</span>
+        ${m.link ? `<a href="${esc(m.link)}" target="_blank" rel="noopener">Open in Gmail</a>` : ""}</div>`).join("")}</div>`
+    : `<div class="empty">Bond, insurance and L&amp;I emails from your inboxes show up here after each check.</div>`;
+}
+
+function lniBox(label, x, kind, a){
+  const hit = a.items.find(i => i.kind === kind);
+  const cls = hit ? (hit.lvl === 2 ? "red" : "amber") : "";
+  if (!x) return `<div class="box ${cls}"><span class="lbl">${label}</span><b>Nothing on file</b></div>`;
+  return `<div class="box ${cls}"><span class="lbl">${label}</span>
+    <b>${esc(x.carrier || "")}</b><span class="mono">${esc(x.number || "")}</span>
+    <span>Effective <span class="mono">${fd(x.effective)}</span></span>
+    <span>Expires <span class="mono">${fd(x.expiration)}</span></span>
+    ${x.cancel ? `<span><b>Cancel date</b> <span class="mono">${fd(x.cancel)}</span></span>` : ""}</div>`;
+}
+
+function openClient(id){
+  openId = id;
+  const c = clients.find(x => x.id === id); if (!c) return closeSheet();
+  const a = assess(c), l = c.lni || {}, reg = l.registration || {};
+  const verify = `https://secure.lni.wa.gov/verify/Detail.aspx?UBI=${encodeURIComponent(c.ubi||"")}&LIC=${encodeURIComponent(c.license)}&SAW=`;
+  $("#panel").innerHTML = `
+    <div class="panel-h"><div><h2>${esc(c.name)}</h2><div class="notice mono">${esc(c.license)} · UBI ${esc(c.ubi || "—")}</div></div>
+      <button class="btn" id="close">Close</button></div>
+    ${a.items.length ? `<div class="why" style="display:flex;flex-wrap:wrap;gap:6px">${a.items.map(i=>`<span class="chip ${i.lvl===2?"red":"amber"}">${esc(i.text)}</span>`).join("")}</div>` : ""}
+    <section class="card"><h3>L&amp;I record <a href="${verify}" target="_blank" rel="noopener" style="font-size:13px;font-weight:500">Open in L&amp;I Verify</a></h3>
+      ${l.checked_at ? `<div class="lni">
+        <div class="box ${a.items.some(i=>i.kind==="reg") ? (reg.status!=="ACTIVE"?"red":"amber") : ""}"><span class="lbl">Registration</span><b>${esc(reg.status || "—")}</b><span>Expires <span class="mono">${fd(reg.expires)}</span></span>${reg.suspended && reg.status !== "ACTIVE" ? `<span>Suspended <span class="mono">${fd(reg.suspended)}</span></span>` : ""}</div>
+        ${lniBox("Liability insurance", l.insurance, "insurance", a)}
+        ${lniBox("Contractor bond", l.bond, "bond", a)}</div>
+        <span class="notice">As of ${new Date(l.checked_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}${reg.status && reg.status!=="ACTIVE" ? ". L&I's public data drops insurance and bond details once a registration is inactive, so check Verify for those." : ""}</span>`
+        : `<span class="notice">Not checked yet. It will be included in the next L&amp;I check.</span>`}
+    </section>
+    <section class="card"><h3>Certificates of insurance <span><button class="btn ghost" id="proofBtn">L&amp;I summary</button><button class="btn primary" id="newCoi">+ Create COI</button></span></h3>
+      <form class="form" id="coiForm" hidden></form>
+      ${(c.cois||[]).length ? c.cois.slice().sort((x,y)=>String(y.cert_date||y.email_date).localeCompare(String(x.cert_date||x.email_date))).map((x,i)=>{ const n = days(x.expiration);
+        return `<div class="pol"><span><b>${esc(x.holder || "No holder listed")}</b>${n != null && n < 0 ? ` <span class="chip plain">expired</span>` : ""}<br>
+          <span class="notice">${esc(x.insurer || "")} <span class="mono">${esc(x.policy || "")}</span> · ${fd(x.effective)} to ${fd(x.expiration)}<br>Issued ${fd(x.cert_date || x.email_date)}${x.producer ? " by " + esc(x.producer) : ""}</span></span>
+          <span style="text-align:right;display:grid;gap:4px;align-content:start">${x.url ? `<button class="btn" data-dl="${esc(x.url)}" data-fn="${esc(x.file || "COI.pdf")}">Download</button><a href="${esc(x.url)}" target="_blank" rel="noopener" style="font-size:12.5px">View</a>` : ""}${x.gmail_link ? `<a href="${esc(x.gmail_link)}" target="_blank" rel="noopener" style="font-size:12.5px">Email</a>` : ""}</span></div>`; }).join("")
+        : `<span class="notice">No COI found in your email for this client yet. New ones are picked up at each check.</span>`}
+      ${a.coi === "other" ? `<span class="notice">None of these COIs match the liability policy L&amp;I shows now (${esc(l.insurance?.number || "")}). Request a current one from the carrier.</span>` : ""}
+      <span class="notice" id="dlMsg"></span>
+    </section>
+    <section class="card"><h3>Follow-up</h3>
+      <form class="form" id="fuForm">
+        <label>Status<select id="fu-status">${["","Need to contact","Contacted","Quote sent","Waiting on payment","Renewed","Filed with L&I"].map(s=>`<option ${c.followup?.status===s?"selected":""}>${s}</option>`).join("")}</select></label>
+        <label>Next follow-up<input id="fu-date" type="date" value="${esc(c.followup?.date||"")}"></label>
+        <label>Contact<input id="ct-name" value="${esc(c.contact?.name||"")}" placeholder="Owner name"></label>
+        <label>Phone<input id="ct-phone" type="tel" value="${esc(c.contact?.phone||"")}"></label>
+        <label class="full">Email<input id="ct-email" type="email" value="${esc(c.contact?.email||"")}"></label>
+        <div class="actions full"><span class="notice" id="fuMsg"></span><button class="btn primary" type="submit">Save</button></div>
+      </form>
+    </section>
+    <section class="card"><h3>Commercial policies <button class="btn ghost" id="addPol">+ Add policy</button></h3>
+      <div id="pols">${(c.policies||[]).length ? c.policies.map((p,i)=>`<div class="pol"><span><b>${esc(p.type)}</b>${p.status ? ` <span class="chip ${DEAD.has(p.status) ? "plain" : "ok"}">${esc(p.status)}</span>` : ""} · ${esc(p.carrier||"")} <span class="mono">${esc(p.number||"")}</span>${p.premium?` · $${esc(p.premium)}`:""}${p.notes?`<br><span class="notice">${esc(p.notes)}</span>`:""}</span>
+        <span class="mono" style="text-align:right">${fd(p.expiration)}<br><button class="btn ghost" data-delpol="${i}" style="font-size:12px">Remove</button></span></div>`).join("") : `<span class="notice">Liability and bond above come from L&amp;I. Add workers comp, auto, umbrella, builders risk and other policies here to track their renewals too.</span>`}</div>
+      <form class="form" id="polForm" hidden>
+        <label>Type<select id="p-type">${["Workers comp","Commercial auto","Umbrella","Builders risk","Inland marine","General liability","Professional liability","Other"].map(s=>`<option>${s}</option>`).join("")}</select></label>
+        <label>Carrier<input id="p-carrier"></label>
+        <label>Policy number<input id="p-number"></label>
+        <label>Effective<input id="p-eff" type="date"></label>
+        <label>Expires<input id="p-exp" type="date" required></label>
+        <label>Premium<input id="p-prem" inputmode="decimal"></label>
+        <label class="full">Notes<input id="p-notes"></label>
+        <div class="actions full"><button class="btn" type="button" id="polCancel">Cancel</button><button class="btn primary" type="submit">Add policy</button></div>
+      </form>
+    </section>
+    <section class="card"><h3>Notes</h3>
+      <form class="form" id="noteForm"><label class="full"><span class="notice">Add a note</span><textarea id="note-text" rows="2" placeholder="Called owner, renewal payment promised Friday"></textarea></label>
+        <div class="actions full"><button class="btn primary" type="submit">Add note</button></div></form>
+      <div style="display:grid;gap:8px">${(c.notes||[]).slice().reverse().map(n=>`<div class="note"><time>${new Date(n.at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</time>${esc(n.text)}</div>`).join("")}</div>
+    </section>
+    <div class="actions"><button class="btn ghost" id="delClient" style="color:var(--red)">Remove client</button></div>`;
+  $("#sheet").hidden = false;
+  wireSheet(c);
+}
+
+async function proofPdf(c){
+  const msg = $("#dlMsg");
+  if (!window.jspdf){ msg.textContent = "The PDF tool did not load. Reload the page and try again."; return; }
+  const {jsPDF} = window.jspdf, d = new jsPDF({unit:"pt", format:"letter"}), l = c.lni || {}, r = l.registration || {};
+  let y = 60; const line = (t, size=11, bold=false) => { d.setFont("helvetica", bold ? "bold" : "normal"); d.setFontSize(size); d.splitTextToSize(t, 500).forEach(s => { d.text(s, 56, y); y += size + 5; }); };
+  line("Washington L&I contractor record summary", 16, true);
+  line("This is a summary of what Washington L&I's public contractor records show. It is not a certificate of insurance and confers no rights.", 9);
+  y += 8; line(c.name, 13, true); line(`License ${c.license}   UBI ${c.ubi || "-"}`);
+  line(`Registration: ${r.status || "-"}, expires ${fd(r.expires)}${r.suspended && r.status !== "ACTIVE" ? ", suspended " + fd(r.suspended) : ""}`);
+  y += 8; line("Liability insurance on file", 12, true);
+  if (l.insurance){ const x = l.insurance; line(`${x.carrier}  Policy ${x.number}`); line(`Effective ${fd(x.effective)}   Expires ${fd(x.expiration)}${x.cancel ? "   Cancel date " + fd(x.cancel) : ""}`); } else line("None on file");
+  y += 8; line("Contractor bond on file", 12, true);
+  if (l.bond){ const x = l.bond; line(`${x.carrier}  Bond ${x.number}${x.amount ? "  $" + Number(x.amount).toLocaleString() : ""}`); line(`Effective ${fd(x.effective)}   Expires ${fd(x.expiration)}${x.cancel ? "   Cancel date " + fd(x.cancel) : ""}`); } else line("None on file");
+  y += 14; line(`Source: Washington State Department of Labor & Industries contractor data (data.wa.gov), as of ${l.checked_at ? new Date(l.checked_at).toLocaleString("en-US") : "-"}. Confirm at secure.lni.wa.gov/verify.`, 9);
+  const blob = d.output("blob"), fn = `${c.name.replace(/[^A-Za-z0-9]+/g, "-")}-LI-summary.pdf`;
+  try { if (dl) await dl.save({filename: fn, data: blob}); else window.open(URL.createObjectURL(blob)); } catch (e) { if (e?.code !== "declined") msg.textContent = "Could not save the PDF."; }
+}
+
+// ---- Certificate generator (Rhino as producer) ----
+const money = v => { const n = Number(String(v||"").replace(/[^0-9.]/g, "")); return n ? "$" + n.toLocaleString("en-US") : ""; };
+function coiDefaults(c){
+  const ins = c.lni?.insurance || {}, num = (ins.number||"").toUpperCase();
+  const prev = (c.cois||[]).filter(x => x.kind === "generated" ? true : (x.policy||"").toUpperCase().includes(num) && num)
+    .sort((a,b) => String(b.cert_date||b.email_date).localeCompare(String(a.cert_date||a.email_date)))[0] || {};
+  const g = prev.gen || {};
+  return {
+    holder: "", insured_address: g.insured_address || prev.insured_address || c.address || "",
+    insurer: g.insurer || ins.carrier || "", naic: g.naic || "", policy: g.policy || ins.number || "",
+    effective: (g.effective || ins.effective || ""), expiration: (g.expiration || (ins.expiration !== "until cancelled" ? ins.expiration : "") || ""),
+    occ: g.occ || prev.each_occurrence || "1,000,000", rented: g.rented || "100,000", med: g.med || "5,000",
+    pai: g.pai || "1,000,000", agg: g.agg || prev.general_aggregate || "2,000,000", prod: g.prod || "2,000,000",
+    claims: g.claims || "occurrence", ai: false, wos: false, desc: ""
+  };
+}
+function coiForm(c){
+  const f = $("#coiForm"), v = coiDefaults(c), fld = (id, label, val, extra="") => `<label ${extra}>${label}<input id="cf-${id}" value="${esc(val)}"></label>`;
+  if (!agency.name || !agency.address){ f.hidden = false; f.innerHTML = `<p class="notice full">Add your agency details first (name, address, phone, authorized representative). They print as the producer on every certificate. <button class="btn" type="button" id="goAgency">Agency details</button></p>`; $("#goAgency").onclick = openAgency; return; }
+  f.hidden = false;
+  f.innerHTML = `
+    <label class="full">Certificate holder (name and address)<textarea id="cf-holder" rows="3" placeholder="ABC General Contractors LLC&#10;123 Main St&#10;Seattle, WA 98101">${esc(v.holder)}</textarea></label>
+    <label class="full">Insured address<textarea id="cf-insured_address" rows="2">${esc(v.insured_address)}</textarea></label>
+    ${fld("insurer","Insurer",v.insurer)}${fld("naic","NAIC #",v.naic)}${fld("policy","Policy number",v.policy)}
+    <label>Policy effective<input id="cf-effective" type="date" value="${esc(v.effective)}"></label>
+    <label>Policy expires<input id="cf-expiration" type="date" value="${esc(v.expiration)}"></label>
+    <label>Coverage form<select id="cf-claims"><option value="occurrence">Occurrence</option><option value="claims-made" ${v.claims==="claims-made"?"selected":""}>Claims-made</option></select></label>
+    ${fld("occ","Each occurrence",v.occ)}${fld("rented","Damage to rented premises",v.rented)}${fld("med","Med exp (any one person)",v.med)}
+    ${fld("pai","Personal &amp; adv injury",v.pai)}${fld("agg","General aggregate",v.agg)}${fld("prod","Products-comp/op agg",v.prod)}
+    <label style="flex-direction:row;display:flex;gap:6px;align-items:center"><input id="cf-ai" type="checkbox" style="width:auto"> Holder is additional insured</label>
+    <label style="flex-direction:row;display:flex;gap:6px;align-items:center"><input id="cf-wos" type="checkbox" style="width:auto"> Waiver of subrogation</label>
+    <label class="full">Description of operations<textarea id="cf-desc" rows="2" placeholder="Job address or project, endorsements"></textarea></label>
+    <p class="notice full">Limits are prefilled from the last certificate on file or common defaults. Check them against the policy declarations before issuing.</p>
+    <div class="actions full"><span class="notice" id="cfMsg"></span><button class="btn" type="button" id="cfCancel">Cancel</button><button class="btn primary" type="submit">Create PDF</button></div>`;
+  $("#cfCancel").onclick = () => { f.hidden = true; };
+  f.onsubmit = async e => { e.preventDefault();
+    const g = {}; ["holder","insured_address","insurer","naic","policy","effective","expiration","claims","occ","rented","med","pai","agg","prod","desc"].forEach(k => g[k] = $("#cf-" + k).value.trim());
+    g.ai = $("#cf-ai").checked; g.wos = $("#cf-wos").checked;
+    if (!g.holder || !g.policy || !g.expiration){ $("#cfMsg").textContent = "Holder, policy number and expiration are required."; return; }
+    const blob = coiPdf(c, g), date = new Date().toISOString().slice(0,10);
+    const file = `COI-${c.name.replace(/[^A-Za-z0-9]+/g,"-")}-${g.holder.split("\n")[0].replace(/[^A-Za-z0-9]+/g,"-").slice(0,40)}-${date}.pdf`;
+    let url = "", id = "";
+    if (assets){ try { const up = await assets.upload(blob, {filename: file}); url = up.url; id = up.id; } catch { $("#cfMsg").textContent = "Saved the record but could not store the PDF."; } }
+    const rec = {kind:"generated", file, url, asset_id:id, holder:g.holder.replace(/\n/g, ", "), policy:g.policy, insurer:g.insurer, effective:g.effective, expiration:g.expiration,
+      producer: agency.name, cert_date: date, gen: g};
+    await save(c, {cois: [...(c.cois||[]), rec]});
+    try { if (dl) await dl.save({filename: file, data: blob}); else window.open(URL.createObjectURL(blob)); } catch {}
+  };
+}
+function coiPdf(c, g){
+  const {jsPDF} = window.jspdf, d = new jsPDF({unit:"pt", format:"letter"});
+  const L = 36, W = 540, R = L + W; let y = 40;
+  const T = (t, x, yy, size=8, bold=false, opts) => { d.setFont("helvetica", bold ? "bold" : "normal"); d.setFontSize(size); d.text(String(t ?? ""), x, yy, opts); };
+  const box = (x, yy, w, h) => d.rect(x, yy, w, h);
+  const wrap = (t, x, yy, w, size=8) => { d.setFont("helvetica","normal"); d.setFontSize(size); const ls = d.splitTextToSize(String(t||""), w); d.text(ls, x, yy); return ls.length * (size + 2); };
+  T("CERTIFICATE OF LIABILITY INSURANCE", L, y, 15, true); T("DATE (MM/DD/YYYY)", R, y - 8, 7, false, {align:"right"});
+  const today = new Date(); T(`${String(today.getMonth()+1).padStart(2,"0")}/${String(today.getDate()).padStart(2,"0")}/${today.getFullYear()}`, R, y + 4, 10, true, {align:"right"});
+  y += 14;
+  y += wrap("THIS CERTIFICATE IS ISSUED AS A MATTER OF INFORMATION ONLY AND CONFERS NO RIGHTS UPON THE CERTIFICATE HOLDER. THIS CERTIFICATE DOES NOT AFFIRMATIVELY OR NEGATIVELY AMEND, EXTEND OR ALTER THE COVERAGE AFFORDED BY THE POLICIES BELOW. THIS CERTIFICATE OF INSURANCE DOES NOT CONSTITUTE A CONTRACT BETWEEN THE ISSUING INSURER(S), AUTHORIZED REPRESENTATIVE OR PRODUCER, AND THE CERTIFICATE HOLDER.", L, y, W, 7) + 4;
+  y += wrap("IMPORTANT: If the certificate holder is an ADDITIONAL INSURED, the policy(ies) must have ADDITIONAL INSURED provisions or be endorsed. If SUBROGATION IS WAIVED, subject to the terms and conditions of the policy, certain policies may require an endorsement. A statement on this certificate does not confer rights to the certificate holder in lieu of such endorsement(s).", L, y, W, 7) + 6;
+  // producer / insured / insurers
+  const half = W / 2; box(L, y, half, 70); box(L + half, y, half, 70);
+  T("PRODUCER", L + 4, y + 10, 7, true); wrap([agency.name, agency.address, agency.city].filter(Boolean).join("\n"), L + 60, y + 10, half - 64, 9);
+  T("CONTACT", L + half + 4, y + 10, 7, true); T(agency.rep || "", L + half + 60, y + 10, 9);
+  T("PHONE", L + half + 4, y + 22, 7, true); T(agency.phone || "", L + half + 60, y + 22, 9);
+  T("E-MAIL", L + half + 4, y + 34, 7, true); T(agency.email || "", L + half + 60, y + 34, 9);
+  T("WA LICENSE", L + half + 4, y + 46, 7, true); T(agency.license || "", L + half + 60, y + 46, 9);
+  y += 70; box(L, y, half, 62); box(L + half, y, half, 62);
+  T("INSURED", L + 4, y + 10, 7, true); wrap([c.name, g.insured_address].filter(Boolean).join("\n"), L + 60, y + 10, half - 64, 9);
+  T("INSURER(S) AFFORDING COVERAGE", L + half + 4, y + 10, 7, true); T("NAIC #", R - 4, y + 10, 7, true, {align:"right"});
+  T("INSURER A:", L + half + 4, y + 24, 7, true); T(g.insurer, L + half + 56, y + 24, 9); T(g.naic, R - 4, y + 24, 9, false, {align:"right"});
+  y += 62;
+  // coverages
+  T("COVERAGES", L, y + 12, 8, true); y += 24;
+  y += wrap("THIS IS TO CERTIFY THAT THE POLICIES OF INSURANCE LISTED BELOW HAVE BEEN ISSUED TO THE INSURED NAMED ABOVE FOR THE POLICY PERIOD INDICATED. NOTWITHSTANDING ANY REQUIREMENT, TERM OR CONDITION OF ANY CONTRACT OR OTHER DOCUMENT WITH RESPECT TO WHICH THIS CERTIFICATE MAY BE ISSUED OR MAY PERTAIN, THE INSURANCE AFFORDED BY THE POLICIES DESCRIBED HEREIN IS SUBJECT TO ALL THE TERMS, EXCLUSIONS AND CONDITIONS OF SUCH POLICIES. LIMITS SHOWN MAY HAVE BEEN REDUCED BY PAID CLAIMS.", L, y, W, 7) + 4;
+  const cols = [L, L + 22, L + 170, L + 194, L + 218, L + 298, L + 348, L + 398];
+  box(L, y, W, 18); ["INSR\nLTR","TYPE OF INSURANCE","ADDL\nINSD","SUBR\nWVD","POLICY NUMBER","POLICY EFF\n(MM/DD/YYYY)","POLICY EXP\n(MM/DD/YYYY)","LIMITS"].forEach((h,i) => { d.setFont("helvetica","bold"); d.setFontSize(6); d.text(h.split("\n"), cols[i] + 2, y + 7); });
+  y += 18; const rowH = 80; box(L, y, W, rowH);
+  const md = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s||""); return m ? `${m[2]}/${m[3]}/${m[1]}` : (s||""); };
+  T("A", cols[0] + 8, y + 12, 9, true);
+  T("X  COMMERCIAL GENERAL LIABILITY", cols[1] + 3, y + 12, 7.5, true);
+  T(g.claims === "claims-made" ? "X  CLAIMS-MADE      OCCUR" : "    CLAIMS-MADE  X  OCCUR", cols[1] + 10, y + 24, 7.5);
+  T("GEN'L AGGREGATE LIMIT APPLIES PER: X POLICY", cols[1] + 3, y + 38, 6.5);
+  T(g.ai ? "Y" : "", cols[2] + 8, y + 12, 9, true); T(g.wos ? "Y" : "", cols[3] + 8, y + 12, 9, true);
+  T(g.policy, cols[4] + 3, y + 12, 8.5); T(md(g.effective), cols[5] + 3, y + 12, 8.5); T(md(g.expiration), cols[6] + 3, y + 12, 8.5);
+  [["EACH OCCURRENCE", g.occ], ["DAMAGE TO RENTED PREMISES", g.rented], ["MED EXP (Any one person)", g.med], ["PERSONAL & ADV INJURY", g.pai], ["GENERAL AGGREGATE", g.agg], ["PRODUCTS - COMP/OP AGG", g.prod]]
+    .forEach(([k, v], i) => { T(k, cols[7] + 2, y + 12 + i * 12, 5.6); T(money(v), R - 4, y + 12 + i * 12, 8, true, {align:"right"}); });
+  y += rowH + 8;
+  box(L, y, W, 60); T("DESCRIPTION OF OPERATIONS / LOCATIONS / VEHICLES", L + 4, y + 10, 7, true);
+  const remarks = [g.desc, g.ai ? "Certificate holder is included as additional insured on the General Liability policy when required by written contract, subject to policy terms." : "", g.wos ? "Waiver of subrogation applies in favor of the certificate holder when required by written contract, subject to policy terms." : ""].filter(Boolean).join(" ");
+  wrap(remarks, L + 4, y + 22, W - 8, 8); y += 68;
+  box(L, y, half, 80); box(L + half, y, half, 80);
+  T("CERTIFICATE HOLDER", L + 4, y + 10, 7, true); wrap(g.holder, L + 8, y + 24, half - 16, 9.5);
+  T("CANCELLATION", L + half + 4, y + 10, 7, true);
+  wrap("SHOULD ANY OF THE ABOVE DESCRIBED POLICIES BE CANCELLED BEFORE THE EXPIRATION DATE THEREOF, NOTICE WILL BE DELIVERED IN ACCORDANCE WITH THE POLICY PROVISIONS.", L + half + 4, y + 20, half - 8, 6.5);
+  T("AUTHORIZED REPRESENTATIVE", L + half + 4, y + 56, 7, true); d.line(L + half + 4, y + 72, R - 8, y + 72); T(agency.rep || "", L + half + 4, y + 70, 9);
+  return d.output("blob");
+}
+function openAgency(){
+  openId = null;
+  $("#panel").innerHTML = `<div class="panel-h"><h2>Agency details</h2><button class="btn" id="close">Close</button></div>
+    <form class="form card" id="agForm">
+      <p class="notice full">Printed as the producer on certificates you create.</p>
+      <label class="full">Agency name<input id="ag-name" value="${esc(agency.name || "Rhino Insurance LLC")}"></label>
+      <label class="full">Street address<input id="ag-address" value="${esc(agency.address || "")}"></label>
+      <label class="full">City, state, ZIP<input id="ag-city" value="${esc(agency.city || "")}"></label>
+      <label>Phone<input id="ag-phone" type="tel" value="${esc(agency.phone || "")}"></label>
+      <label>Email<input id="ag-email" type="email" value="${esc(agency.email || "acigedi@gmail.com")}"></label>
+      <label>Authorized representative<input id="ag-rep" value="${esc(agency.rep || "Eduard Kaplun")}"></label>
+      <label>WA agency license #<input id="ag-license" value="${esc(agency.license || "")}"></label>
+      <div class="actions full"><span class="notice" id="agMsg"></span><button class="btn primary" type="submit">Save</button></div>
+    </form>`;
+  $("#sheet").hidden = false; $("#close").onclick = closeSheet;
+  $("#agForm").onsubmit = async e => { e.preventDefault();
+    const a = {}; ["name","address","city","phone","email","rep","license"].forEach(k => a[k] = $("#ag-" + k).value.trim());
+    try { await db.doc("meta/agency").set(a); $("#agMsg").textContent = "Saved"; } catch { $("#agMsg").textContent = "Could not save."; } };
+}
+
+function closeSheet(){ openId = null; $("#sheet").hidden = true; }
+
+async function save(c, patch, msgEl){
+  if (!db){ if (msgEl) msgEl.textContent = "Saving is unavailable in this view."; return false; }
+  try { await db.doc("clients/" + c.id).update(patch); if (msgEl) msgEl.textContent = "Saved"; return true; }
+  catch(e){ if (msgEl) msgEl.textContent = e.code === "invalid_argument" ? "You have view-only access." : "Could not save. Try again."; return false; }
+}
+
+function wireSheet(c){
+  $("#close").onclick = closeSheet;
+  document.querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+    const msg = $("#dlMsg");
+    try { const blob = await (await fetch(b.dataset.dl)).blob();
+      if (!dl) { msg.textContent = "Use View to open the PDF, then save it from there."; return; }
+      await dl.save({filename: b.dataset.fn, data: blob}); msg.textContent = "";
+    } catch (e) { msg.textContent = e?.code === "declined" ? "" : "Could not download. Use View to open the PDF instead."; } });
+  $("#proofBtn").onclick = () => proofPdf(c);
+  $("#newCoi").onclick = () => coiForm(c);
+  $("#fuForm").onsubmit = async e => { e.preventDefault();
+    await save(c, {followup:{status:$("#fu-status").value, date:$("#fu-date").value},
+      contact:{name:$("#ct-name").value.trim(), phone:$("#ct-phone").value.trim(), email:$("#ct-email").value.trim()}}, $("#fuMsg")); };
+  $("#addPol").onclick = () => { $("#polForm").hidden = false; $("#p-carrier").focus(); };
+  $("#polCancel").onclick = () => { $("#polForm").hidden = true; };
+  $("#polForm").onsubmit = async e => { e.preventDefault();
+    const p = {type:$("#p-type").value, carrier:$("#p-carrier").value.trim(), number:$("#p-number").value.trim(), effective:$("#p-eff").value, expiration:$("#p-exp").value, premium:$("#p-prem").value.trim(), notes:$("#p-notes").value.trim()};
+    await save(c, {policies:[...(c.policies||[]), p]}); };
+  document.querySelectorAll("[data-delpol]").forEach(b => b.onclick = async () => {
+    if (b.dataset.confirm !== "1"){ b.dataset.confirm = "1"; b.textContent = "Tap to confirm"; return; }
+    const ps = (c.policies||[]).slice(); ps.splice(+b.dataset.delpol, 1); await save(c, {policies: ps}); });
+  $("#noteForm").onsubmit = async e => { e.preventDefault(); const t = $("#note-text").value.trim(); if (!t) return;
+    await save(c, {notes:[...(c.notes||[]), {at:new Date().toISOString(), text:t}]}); };
+  $("#delClient").onclick = async e => { const b = e.currentTarget;
+    if (b.dataset.confirm !== "1"){ b.dataset.confirm = "1"; b.textContent = "Tap again to remove this client"; return; }
+    try { await db.doc("clients/" + c.id).delete(); closeSheet(); } catch { b.textContent = "Could not remove"; } };
+}
+
+function openAdd(){
+  openId = null;
+  $("#panel").innerHTML = `<div class="panel-h"><h2>Add client</h2><button class="btn" id="close">Close</button></div>
+    <form class="form card" id="addForm">
+      <label class="full">Business name<input id="a-name" required></label>
+      <label>L&amp;I license number<input id="a-lic" class="mono" required placeholder="ABCDECL123AB" autocapitalize="characters"></label>
+      <label>UBI<input id="a-ubi" class="mono" inputmode="numeric"></label>
+      <label>Contact<input id="a-ct"></label><label>Phone<input id="a-ph" type="tel"></label>
+      <div class="actions full"><span class="notice" id="addMsg">L&amp;I dates fill in at the next check.</span><button class="btn primary" type="submit">Add client</button></div>
+    </form>`;
+  $("#sheet").hidden = false;
+  $("#close").onclick = closeSheet;
+  $("#addForm").onsubmit = async e => { e.preventDefault();
+    const lic = $("#a-lic").value.trim().toUpperCase(), id = docId(lic);
+    if (!db){ $("#addMsg").textContent = "Saving is unavailable in this view."; return; }
+    if (clients.some(c => c.id === id)){ $("#addMsg").textContent = "That license is already on the list."; return; }
+    try { await db.doc("clients/" + id).set({name:$("#a-name").value.trim().toUpperCase(), license:lic, ubi:$("#a-ubi").value.replace(/\D/g,""),
+      contact:{name:$("#a-ct").value.trim(), phone:$("#a-ph").value.trim(), email:""}, followup:{status:"",date:""}, policies:[], notes:[], added_at:new Date().toISOString()});
+      openClient(id); } catch { $("#addMsg").textContent = "Could not add. Check the license number and try again."; } };
+}
+
+// events
+$("#desk").addEventListener("click", e => { const r = e.target.closest(".row"); if (r) openClient(r.dataset.id); });
+$("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") closeSheet(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
+$("#q").addEventListener("input", () => { render(); if (!$("#todo").hidden) renderTodo(); });
+$("#addBtn").onclick = openAdd;
+$("#agencyBtn").onclick = openAgency;
+document.querySelectorAll(".tile").forEach(t => t.onclick = () => { filter = filter === +t.dataset.f ? null : +t.dataset.f; showTab("desk"); render(); });
+function showTab(t){ for (const k of ["today","desk","todo","inbox"]){ $("#" + k).hidden = t !== k; $("#tab-" + k).setAttribute("aria-selected", String(t === k)); } }
+$("#tab-todo").onclick = () => { showTab("todo"); renderTodo(); };
+$("#todo").addEventListener("click", async e => {
+  const b = e.target.closest("[data-done]");
+  if (b){ const done = b.dataset.done === "1";
+    try { await db.doc("todo/" + b.dataset.id).update({done, done_at: done ? new Date().toISOString() : ""}); }
+    catch { b.textContent = "Could not save"; } return; }
+  const o = e.target.closest("[data-open]"); if (o) openClient(o.dataset.open);
+});
+$("#tab-desk").onclick = () => showTab("desk");
+$("#tab-today").onclick = () => { showTab("today"); renderToday(); };
+$("#tab-inbox").onclick = () => { showTab("inbox"); renderInbox(); };
+
+render(); renderInbox();
+(async () => {
+  Promise.resolve(window.claude?.use?.("downloads")).then(x => { dl = x ?? null; }).catch(() => {});
+  db = await window.claude?.use?.("db") ?? null;
+  window.sosInit?.(db);
+  if (!db){ $("#desk").innerHTML = $("#today").innerHTML = `<div class="empty">Open this page in Claude while signed in to see your clients.</div>`; return; }
+  db.collection("clients").onSnapshot(s => {
+    clients = s.docs.map(d => ({id: d.id, ...d.data()}));
+    render();
+    if (openId && !document.activeElement?.closest?.("#panel form")) openClient(openId);
+  }, () => {});
+  Promise.resolve(window.claude?.use?.("assets")).then(x => { assets = x ?? null; }).catch(() => {});
+  db.doc("meta/agency").onSnapshot(s => { agency = s.exists ? s.data() : {}; }, () => {});
+  db.doc("meta/status").onSnapshot(s => { meta = s.exists ? s.data() : {}; render(); renderInbox(); }, () => {});
+  db.collection("todo").onSnapshot(s => { todos = s.docs.map(d => ({id: d.id, ...d.data()})); renderTodo(); renderToday(); }, () => {});
+})();
+</script>
+<script>
+// SOS status mode for the Rhino Renewal Desk.
+// Loaded as a second <script> after the main app script, so it shares its globals ($, esc, fd, days, rel, closeSheet).
+// It reads and writes only the `sos` collection and the `sosmeta/status` doc, never `clients`.
+const SOS_WARN = 60;
+const SOS_DEAD = /dissolv|terminat|revok|inactive|withdr|expired|cancel|merged|forfeit/i;
+const SOS_FU = ["", "Reminded client", "Client filing", "We are filing", "Filed, waiting on SOS", "Reinstating", "Not our client anymore"];
+let sosDb = null, sosRows = [], sosMeta = {}, sosFilter = null, sosOpenId = null;
+
+function sosId(ubi, name){
+  const u = String(ubi || "").replace(/\D/g, "");
+  return u.length === 9 ? u : "NAME-" + String(name || "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+function sosUbi(u){ u = String(u || "").replace(/\D/g, ""); return u.length === 9 ? `${u.slice(0,3)} ${u.slice(3,6)} ${u.slice(6)}` : "No UBI yet"; }
+
+// One of: dead (dissolved/inactive), delinquent, due (annual report due), check (not found / needs a look), ok, wait (not checked yet).
+function sosAssess(b){
+  const s = b.sos || {};
+  if (!s.checked_at) return {k: "wait", text: "Waiting for the first SOS check"};
+  if (!s.found) return {k: "check", text: b.ubi ? "Not found at the Secretary of State" : "Add the UBI so it can be checked"};
+  const st = String(s.status || "").trim();
+  if (/delinquent/i.test(st)) return {k: "delinquent", text: "Delinquent", n: days(s.ar_due)};
+  if (SOS_DEAD.test(st)) return {k: "dead", text: st.replace(/\b\w/g, c => c.toUpperCase()).replace(/\B\w+/g, w => w.toLowerCase())};
+  const n = days(s.ar_due);
+  if (n != null && n <= SOS_WARN) return {k: "due", text: n < 0 ? `Annual report overdue ${rel(n)}` : `Annual report due ${rel(n)}`, n};
+  if (st && !/^active$/i.test(st)) return {k: "check", text: st};
+  return {k: "ok", text: "Active", n};
+}
+const SOS_GROUPS = [["dead","Dissolved or inactive","red"],["delinquent","Delinquent","red"],["due","Annual report due","amber"],["check","Needs a look","amber"],["wait","Not checked yet","plain"],["ok","Active","ok"]];
+
+function sosShell(){
+  $("#sosMode").innerHTML = `
+  <header class="top">
+    <div class="brand"><h1>SOS Status</h1><span class="sub" id="sosChecked">Washington Secretary of State business status</span></div>
+    <div class="tiles sos-tiles">
+      <button class="tile red" data-sf="dead" aria-pressed="false"><b id="sn-dead">–</b><span>Dissolved</span></button>
+      <button class="tile red" data-sf="delinquent" aria-pressed="false"><b id="sn-delinquent">–</b><span>Delinquent</span></button>
+      <button class="tile amber" data-sf="due" aria-pressed="false"><b id="sn-due">–</b><span>Report due</span></button>
+      <button class="tile ok" data-sf="ok" aria-pressed="false"><b id="sn-ok">–</b><span>Active</span></button>
+    </div>
+    <div class="bar">
+      <input class="search" id="sq" type="search" placeholder="Search business or UBI" aria-label="Search businesses">
+      <button class="btn primary" id="sosAdd">+ Business</button>
+    </div>
+  </header>
+  <main id="sosList"></main>
+  <p class="foot">Status comes from the Washington Secretary of State (Corporations and Charities) and is refreshed every Monday morning. This list is separate from your policy clients.</p>`;
+  $("#sq").addEventListener("input", sosRender);
+  $("#sosAdd").onclick = sosOpenAdd;
+  document.querySelectorAll("[data-sf]").forEach(t => t.onclick = () => { sosFilter = sosFilter === t.dataset.sf ? null : t.dataset.sf; sosRender(); });
+  $("#sosList").addEventListener("click", e => { const r = e.target.closest(".row"); if (r) sosOpen(r.dataset.id); });
+}
+
+function sosRender(){
+  if (!$("#sosList")) return;
+  const q = ($("#sq").value || "").trim().toLowerCase(), qd = q.replace(/\D/g, "");
+  const rows = sosRows.map(b => ({b, a: sosAssess(b)}));
+  const cnt = {}; rows.forEach(r => cnt[r.a.k] = (cnt[r.a.k] || 0) + 1);
+  for (const k of ["dead","delinquent","due","ok"]) $("#sn-" + k).textContent = cnt[k] || 0;
+  document.querySelectorAll("[data-sf]").forEach(t => t.setAttribute("aria-pressed", String(sosFilter === t.dataset.sf)));
+  const ck = sosMeta.checked_at ? new Date(sosMeta.checked_at) : null;
+  $("#sosChecked").textContent = sosMeta.error ? `Last SOS check failed: ${sosMeta.error}` :
+    ck ? `SOS checked ${ck.toLocaleString("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"})}` : "Waiting for the first SOS check";
+  if (!sosRows.length){ $("#sosList").innerHTML = `<div class="empty">No businesses yet. Add one with <b>+ Business</b> using its UBI.</div>`; return; }
+  const vis = rows.filter(r => (!sosFilter || r.a.k === sosFilter) &&
+    (!q || String(r.b.name || "").toLowerCase().includes(q) || (qd && String(r.b.ubi || "").includes(qd))));
+  vis.sort((x, y) => (x.a.n ?? 99999) - (y.a.n ?? 99999) || String(x.b.name).localeCompare(String(y.b.name)));
+  $("#sosList").innerHTML = SOS_GROUPS.map(([k, title, tone]) => {
+    const g = vis.filter(r => r.a.k === k);
+    return g.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${g.length}</span></div><div class="list">${g.map(r => sosRowHtml(r, tone)).join("")}</div>` : "";
+  }).join("") || `<div class="empty">No businesses match.</div>`;
+}
+
+function sosRowHtml({b, a}, tone){
+  const s = b.sos || {}, fu = b.followup?.status, sev = tone === "red" ? "s2" : tone === "amber" ? "s1" : tone === "plain" ? "sos-plain" : "";
+  return `<button class="row ${sev}" data-id="${esc(b.id)}"><span class="sev"></span>
+    <span class="main"><span class="name">${esc(s.name || b.name)}</span>
+      <span class="meta mono">${esc(sosUbi(b.ubi))}${s.type ? " · " + esc(s.type) : ""}</span>
+      <span class="why"><span class="chip ${tone}">${esc(a.text)}</span>${fu ? `<span class="chip info">${esc(fu)}</span>` : ""}</span></span>
+    <span class="dates mono"><span>Report due <b>${fd(s.ar_due)}</b></span>${s.inactive_date ? `<span>Inactive <b>${fd(s.inactive_date)}</b></span>` : `<span>Formed <b>${fd(s.formed)}</b></span>`}</span>
+  </button>`;
+}
+
+function sosOpen(id){
+  const b = sosRows.find(x => x.id === id); if (!b) return;
+  sosOpenId = id;
+  const s = b.sos || {}, a = sosAssess(b), fu = b.followup || {};
+  const tone = {dead:"red",delinquent:"red",due:"amber",check:"amber",wait:"plain",ok:"ok"}[a.k];
+  const kv = [["Status", s.status], ["Business type", s.type], ["UBI", sosUbi(b.ubi)], ["Annual report due", s.ar_due && fd(s.ar_due)],
+    ["Formed", s.formed && fd(s.formed)], ["Inactive since", s.inactive_date && fd(s.inactive_date)], ["Registered agent", s.agent],
+    ["Principal office", s.principal_address], ["Governors", (s.governors || []).join(", ")], ["Checked", s.checked_at && new Date(s.checked_at).toLocaleString("en-US")]]
+    .filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+  $("#panel").innerHTML = `<div class="panel-h"><div><h2>${esc(s.name || b.name)}</h2><span class="chip ${tone}">${esc(a.text)}</span></div><button class="btn" id="sosClose">Close</button></div>
+    <div class="card"><h3>Secretary of State<a href="https://ccfs.sos.wa.gov/#/BusinessSearch" target="_blank" rel="noopener" class="notice">Open SOS search</a></h3>
+      ${kv ? `<dl class="kv">${kv}</dl>` : `<p class="notice">Nothing from the Secretary of State yet.</p>`}</div>
+    <form class="form card" id="sosFu"><h3 class="full">Follow-up</h3>
+      <label>Status<select id="sf-status">${SOS_FU.map(o => `<option${o === (fu.status || "") ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>
+      <label>Date<input type="date" id="sf-date" value="${esc(fu.date || "")}"></label>
+      <label class="full">UBI<input id="sf-ubi" class="mono" inputmode="numeric" value="${esc(b.ubi || "")}"></label>
+      <div class="actions full"><span class="notice" id="sfMsg"></span><button class="btn primary" type="submit">Save</button></div></form>
+    <form class="card" id="sosNoteF"><h3>Notes</h3>${(b.notes || []).map(n => `<div class="note"><time>${esc(new Date(n.at).toLocaleString("en-US"))}</time>${esc(n.text)}</div>`).join("")}
+      <div class="form"><label class="full"><textarea id="sn-text" rows="2" placeholder="Add a note"></textarea></label><div class="actions full"><button class="btn" type="submit">Add note</button></div></div></form>
+    <div class="actions"><button class="btn ghost" id="sosDel">Remove from SOS list</button></div>`;
+  $("#sheet").hidden = false;
+  $("#sosClose").onclick = sosClose;
+  const save = async (patch, msg) => {
+    try { await sosDb.doc("sos/" + id).update(patch); if (msg) msg.textContent = "Saved"; }
+    catch(e){ if (msg) msg.textContent = e.code === "invalid_argument" ? "You have view-only access." : "Could not save. Try again."; } };
+  $("#sosFu").onsubmit = e => { e.preventDefault(); const u = $("#sf-ubi").value.replace(/\D/g, "");
+    if (u && u.length !== 9){ $("#sfMsg").textContent = "A UBI has 9 digits."; return; }
+    save({followup: {status: $("#sf-status").value, date: $("#sf-date").value}, ubi: u}, $("#sfMsg")); };
+  $("#sosNoteF").onsubmit = e => { e.preventDefault(); const t = $("#sn-text").value.trim(); if (t) save({notes: [...(b.notes || []), {at: new Date().toISOString(), text: t}]}); };
+  $("#sosDel").onclick = async e => { const x = e.currentTarget;
+    if (x.dataset.confirm !== "1"){ x.dataset.confirm = "1"; x.textContent = "Tap again to remove"; return; }
+    try { await sosDb.doc("sos/" + id).delete(); sosClose(); } catch { x.textContent = "Could not remove"; } };
+}
+function sosClose(){ sosOpenId = null; closeSheet(); }
+
+function sosOpenAdd(){
+  sosOpenId = null;
+  $("#panel").innerHTML = `<div class="panel-h"><h2>Add business</h2><button class="btn" id="sosClose">Close</button></div>
+    <form class="form card" id="sosAddF">
+      <label class="full">Business name<input id="sa-name" required></label>
+      <label class="full">UBI<input id="sa-ubi" class="mono" inputmode="numeric" placeholder="604 123 456"></label>
+      <div class="actions full"><span class="notice" id="saMsg">Status fills in at the next SOS check.</span><button class="btn primary" type="submit">Add</button></div></form>`;
+  $("#sheet").hidden = false;
+  $("#sosClose").onclick = sosClose;
+  $("#sosAddF").onsubmit = async e => { e.preventDefault();
+    const name = $("#sa-name").value.trim().toUpperCase(), ubi = $("#sa-ubi").value.replace(/\D/g, ""), id = sosId(ubi, name);
+    if (ubi && ubi.length !== 9){ $("#saMsg").textContent = "A UBI has 9 digits."; return; }
+    if (!sosDb){ $("#saMsg").textContent = "Saving is unavailable in this view."; return; }
+    if (sosRows.some(b => b.id === id)){ $("#saMsg").textContent = "That business is already on the list."; return; }
+    try { await sosDb.doc("sos/" + id).set({ubi, name, source: "manual", added_at: new Date().toISOString(), followup: {status: "", date: ""}, notes: []}); sosOpen(id); }
+    catch { $("#saMsg").textContent = "Could not add. Try again."; } };
+}
+
+function setMode(m){
+  try { localStorage.setItem("rhino-mode", m); } catch {}
+  $("#policyMode").hidden = m !== "policies"; $("#sosMode").hidden = m !== "sos";
+  document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.mode === m)));
+  if (!$("#sheet").hidden) closeSheet();
+}
+document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+sosShell(); sosRender();
+try { if (localStorage.getItem("rhino-mode") === "sos") setMode("sos"); } catch {}
+
+// Called by the main script once the database is ready.
+function sosInit(d){
+  if (!d || sosDb) return;
+  sosDb = d;
+  d.collection("sos").onSnapshot(s => {
+    sosRows = s.docs.map(x => ({id: x.id, ...x.data()}));
+    sosRender();
+    if (sosOpenId && !$("#sheet").hidden && !document.activeElement?.closest?.("#panel form")) sosOpen(sosOpenId);
+  }, () => {});
+  d.doc("sosmeta/status").onSnapshot(s => { sosMeta = s.exists ? s.data() : {}; sosRender(); }, () => {});
+}
+// The main script may have got the database before this script loaded.
+if (typeof db !== "undefined" && db) sosInit(db);
+</script>
