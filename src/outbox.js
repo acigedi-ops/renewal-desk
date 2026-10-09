@@ -111,9 +111,10 @@
         const {data} = await window.rdSupabase.auth.getSession();
         const r = await fetch("/api/outbox/send", {method: "POST", headers: {"Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token || ""}`}, body: JSON.stringify({id})});
         const out = await r.json().catch(() => ({}));
-        if (!r.ok){ e.target.disabled = false; say("Not sent: " + (out.error || r.status)); }
+        if (!r.ok){ e.target.disabled = false; say("Not sent: " + (out.error || r.status)); alert("Not sent: " + (out.error || `error ${r.status}`)); }
+        else alert(`Sent to ${f.to.join(", ")}.`);
       }
-    } catch (err){ say("Could not save: " + (err?.message || err)); }
+    } catch (err){ say("Could not save: " + (err?.message || err)); alert("Something went wrong: " + (err?.message || err)); }
   });
   main.addEventListener("change", async e => {
     const inp = e.target.closest("[data-add]"); if (!inp) return;
