@@ -1,5 +1,5 @@
 // Lets Cloudflare deploy this with no settings typed in: `npx wrangler deploy` runs the build, then uploads dist/.
-// worker/index.js only handles /api/* (the Outbox "Approve & send"); every other path is served straight from dist/.
+// Files in dist/ are served directly; anything else (only /api/outbox/send, the Outbox "Approve & send") reaches worker/index.js.
 // Secret, set in the Cloudflare dashboard and never in this repo: GMAIL_APP_PASSWORD (Gmail app password for GMAIL_USER).
 {
   "name": "renewal-desk",
@@ -7,7 +7,8 @@
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "build": {"command": "node build.mjs"},
-  "assets": {"directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"]},
+  // No SPA fallback: the app is a single page at "/", so /api/* never matches a file and reaches the Worker.
+  "assets": {"directory": "./dist", "binding": "ASSETS"},
   "vars": {
     "GMAIL_USER": "kaplunlicensing@gmail.com",
     "FROM_NAME": "Eduard Kaplun",
