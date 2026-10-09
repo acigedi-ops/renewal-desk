@@ -1,4 +1,4 @@
-// Builds dist/ for Vercel: wraps src/app.html (the same source as the claude.ai artifact) in a full page
+// Builds dist/ for Cloudflare Pages (build command `node build.mjs`, output `dist`): wraps src/app.html (the same source as the claude.ai artifact) in a full page
 // and loads the Supabase client, config and shim before the app's own scripts.
 import {readFileSync, writeFileSync, mkdirSync, cpSync} from "node:fs";
 

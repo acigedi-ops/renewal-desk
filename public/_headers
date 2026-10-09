@@ -1,0 +1,10 @@
+/*
+  X-Frame-Options: DENY
+  Referrer-Policy: same-origin
+  X-Robots-Tag: noindex
+
+/config.js
+  Cache-Control: no-cache
+
+/shim.js
+  Cache-Control: no-cache
