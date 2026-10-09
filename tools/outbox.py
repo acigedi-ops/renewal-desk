@@ -17,7 +17,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from rd import get_doc, list_docs, set_doc, update_doc, upload  # noqa: E402
 
 LNI_TO = "tukwila@lni.wa.gov"
-SIGNATURE = "--\nEduard Kaplun\nFounder\nKaplun Licensing LLC\n(253)-335-9649\nKaplunlicensing@gmail.com\nKaplunlicensing.com"
+SIGNATURE = "--\nEduard Kaplun\nFounder\nRhino Insurance Group LLC\n(253)-335-9649\nEduard@rhino.insure\nrhinoinsuranceco.com"
 
 
 def ubi_fmt(u):
@@ -33,8 +33,8 @@ def template(kind, c, to=None):
     first = (str((c.get("contact") or {}).get("name") or "").split() or ["there"])[0]
     email = to or (c.get("contact") or {}).get("email") or ""
     return {"to": [e for e in re.split(r"[,;\s]+", email) if e], "cc": [],
-            "subject": f"Welcome to Kaplun Licensing - {c['name']}",
-            "body": f"Hi {first},\n\nWelcome to Kaplun Licensing, and thank you for trusting us with {c['name']}! Your documents are attached:\n\n"
+            "subject": f"Welcome to Rhino Insurance Group - {c['name']}",
+            "body": f"Hi {first},\n\nWelcome to Rhino Insurance Group, and thank you for trusting us with {c['name']}! Your documents are attached:\n\n"
                     f"- Certificate of insurance (liability)\n- Contractor bond\n\nPlease keep them for your records. We keep an eye on your L&I "
                     f"registration, insurance and bond, and we will reach out before anything renews. If you need a certificate for a job or have "
                     f"any questions, just reply to this email or call us.\n\nThank you,\n\n{SIGNATURE}"}
