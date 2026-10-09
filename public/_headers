@@ -8,3 +8,6 @@
 
 /shim.js
   Cache-Control: no-cache
+
+/outbox.js
+  Cache-Control: no-cache

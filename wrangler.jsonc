@@ -1,7 +1,28 @@
 // Lets Cloudflare deploy this with no settings typed in: `npx wrangler deploy` runs the build, then uploads dist/.
+// Files in dist/ are served directly; anything else (only /api/outbox/send, the Outbox "Approve & send") reaches worker/index.js.
+// Secret, set in the Cloudflare dashboard and never in this repo: GMAIL_APP_PASSWORD (Gmail app password for GMAIL_USER).
 {
   "name": "renewal-desk",
+  "main": "worker/index.js",
   "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
   "build": {"command": "node build.mjs"},
-  "assets": {"directory": "./dist", "not_found_handling": "single-page-application"}
+  // No SPA fallback: the app is a single page at "/", so /api/* never matches a file and reaches the Worker.
+  "assets": {"directory": "./dist", "binding": "ASSETS"},
+  "vars": {
+    "GMAIL_USER": "kaplunlicensing@gmail.com",
+    "FROM_NAME": "Eduard Kaplun",
+    "SUPABASE_URL": "https://dapyzgcpzivaiiousifb.supabase.co",
+    "SUPABASE_KEY": "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"
+  },
+  // Branch/PR builds run `wrangler preview`, which requires its own vars. Same public values: a preview has no
+  // GMAIL_APP_PASSWORD secret, so it can't send mail, and it can only read data with a signed-in user's session.
+  "previews": {
+    "vars": {
+      "GMAIL_USER": "kaplunlicensing@gmail.com",
+      "FROM_NAME": "Eduard Kaplun",
+      "SUPABASE_URL": "https://dapyzgcpzivaiiousifb.supabase.co",
+      "SUPABASE_KEY": "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"
+    }
+  }
 }
