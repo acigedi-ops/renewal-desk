@@ -9,8 +9,13 @@ The same app as the claude.ai artifact, hosted on Cloudflare (free, commercial u
 - `public/config.js` holds the Supabase project URL and publishable key (public by design).
 - `supabase/schema.sql` creates table `docs(collection, id, data jsonb)`, the `merge_doc` function, realtime, and the private `cois` bucket. Only signed-in users can read or write.
 
+## Outbox (emails Eduard approves)
+- `src/outbox.js` adds the Outbox tab and an "Emails" card on each client (Send bond to L&I, Welcome email). It is loaded by `build.mjs` after the app, because the L&I routine overwrites `src/app.html`.
+- `worker/index.js` serves `dist/` and handles `POST /api/outbox/send {id}`: it checks the caller's Supabase session, reads `outbox/<id>` and its PDFs with that user's token, and sends through smtp.gmail.com:465 (`worker/mail.js`) as `GMAIL_USER`. Secret `GMAIL_APP_PASSWORD` (a Gmail app password) is set in Cloudflare, never in the repo.
+- `tools/outbox.py` queues emails from routines; `tools/OUTBOX_ROUTINE_STEP.md` is the welcome-email step for the twice-daily routine.
+
 ## Data layout (same as the artifact db)
-`clients/<license>`, `meta/status`, `meta/agency`, `todo/<id>`, `sos/<UBI>`, `sosmeta/status`.
+`clients/<license>` (plus `bond_files` from the Outbox), `outbox/<id>`, `meta/status`, `meta/agency`, `todo/<id>`, `sos/<UBI>`, `sosmeta/status`.
 COI PDFs live in bucket `cois` at `<asset_id>/<file>`; `cois[].url` is `/coi/<asset_id>/<file>` and the shim swaps it for a signed URL.
 
 ## Updating the app
