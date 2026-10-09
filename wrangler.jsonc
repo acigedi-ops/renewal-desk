@@ -3,7 +3,7 @@
 // Secret, set in the Cloudflare dashboard and never in this repo: GMAIL_APP_PASSWORD (Gmail app password for GMAIL_USER).
 {
   "name": "renewal-desk",
-  "main": "worker/index.js",
+  // TEMP (diagnosing branch builds): Worker script switched off; restore "main": "worker/index.js".
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "build": {"command": "node build.mjs"},
