@@ -66,6 +66,7 @@ header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background
 .call .body{display:grid;gap:4px;min-width:0}
 .call .name{font-weight:600;overflow-wrap:anywhere}
 .call .why{display:flex;flex-wrap:wrap;gap:4px 6px}
+.call .why .chip{white-space:normal}
 .call .actions{grid-column:1/-1}
 .empty{border:1px dashed var(--line);border-radius:var(--r);padding:18px;color:var(--muted);text-align:center;margin-top:8px}
 .foot{color:var(--muted);font-size:12px;margin-top:22px}
@@ -242,7 +243,7 @@ function todoCard(t){
   const lrows = l.length ? l.map(r => `<span class="mono">${esc(r.number)}</span><br><span class="notice">${esc(r.carrier || "")}${r.carrier ? " · " : ""}${fd(r.effective)} to ${fd(r.expiration)}</span>`).join("<br>") : `<span class="notice">Nothing on file</span>`;
   return `<div class="card">
     <h3><button class="btn ghost" data-open="${esc(t.client_id)}" style="padding:0;font-size:15px;text-align:left">${esc(t.client)}</button>
-      <span>${t.due ? `<span class="chip ${days(t.due) <= 30 ? "red" : "plain"}">L&amp;I coverage ends ${fd(t.due)}</span>` : ""}<span class="chip ${SEV[t.severity][1]}">${esc(t.title)}</span></span></h3>
+      <span>${t.kind === "suspended" ? `<span class="chip red">${t.title.includes("expired") ? "Expired" : "Suspended"} ${t.due ? fd(t.due) : ""}</span>` : t.due ? `<span class="chip ${days(t.due) <= 30 ? "red" : "plain"}">L&amp;I coverage ends ${fd(t.due)}</span>` : ""}<span class="chip ${SEV[t.severity][1]}">${esc(t.title)}</span></span></h3>
     <span>${esc(t.detail)}</span>
     <div class="lni">
       <div class="box"><span class="lbl">Correct (portal / email)</span>${c.number ? `<span class="mono">${esc(c.number)}</span><span class="notice">${esc(c.carrier || "")}</span><span class="notice">${fd(c.effective)} to ${fd(c.expiration)}${c.status ? " · " + esc(c.status) : ""}</span>` : `<span class="notice">—</span>`}</div>
@@ -261,13 +262,15 @@ function renderTodo(){
   $("#todoN").textContent = todoCount ? `(${todoCount})` : "";
   if (!open.length){ $("#todo").innerHTML = `<div class="empty">Nothing to fix. Every policy in the app matches what L&amp;I has on file.</div>`; return; }
   const sorted = vis.slice().sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.client.localeCompare(b.client));
-  const group = (sev) => sorted.filter(t => !t.done && t.severity === sev);
+  const group = (sev) => sorted.filter(t => !t.done && t.severity === sev && t.kind !== "suspended");
+  const lapsed = sorted.filter(t => !t.done && t.kind === "suspended").reverse();
   const done = sorted.filter(t => t.done);
   const sec = (title, list, note) => list.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${list.length}</span></div>${note ? `<p class="notice" style="margin:4px 0">${note}</p>` : ""}<div class="list">${list.map(todoCard).join("")}</div>` : "";
   const minor = group("minor");
   $("#todo").innerHTML =
     `<p class="notice" style="margin:12px 0 0">Policies where L&amp;I's records don't match the app. The app uses your carrier portals and emails as the correct version. Rebuilt at every L&amp;I check.</p>` +
     sec("Fix now: coverage at L&amp;I ends within 30 days", group("urgent")) +
+    sec("Suspended or expired at L&amp;I, but insured: reinstate", lapsed) +
     sec("Fix at L&amp;I", group("fix")) +
     (minor.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">Small differences (${minor.length}): a missing last digit or dates off by a day or two</summary><div class="list">${minor.map(todoCard).join("")}</div></details>` : "") +
     sec("Marked fixed, waiting for L&amp;I to update", done) +
@@ -280,7 +283,9 @@ function callReasons(c){
   const out = [], l = c.lni || {}, reg = l.registration || {};
   const add = (n, text) => out.push({n, text});
   if (!c.license || !l.checked_at) return out;
-  if (reg.status && reg.status !== "ACTIVE"){ const since = days(reg.suspended) ?? days(reg.expires); add(since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(reg.suspended || reg.expires) : ""}`); return out; }
+  if (reg.status && reg.status !== "ACTIVE"){ const since = days(reg.suspended) ?? days(reg.expires); add(since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(reg.suspended || reg.expires) : ""}`);
+    if (todos.some(t => t.client_id === c.id && t.state !== "resolved" && !t.done && t.kind === "suspended")) add(null, "Still insured: needs a bond and filing to reinstate");
+    return out; }
   const rn = days(reg.expires); if (rn != null && rn <= TODAY_WINDOW) add(rn, rn < 0 ? "Registration expired" : `Registration renews ${fd(reg.expires)}`);
   for (const [k, label] of [["insurance", "Liability"], ["bond", "Bond"]]){
     const x = l[k];
@@ -289,7 +294,7 @@ function callReasons(c){
     if (cn != null && cn <= TODAY_WINDOW) add(cn, `${label} cancels ${fd(x.cancel)}`);
     else if (un != null && un <= TODAY_WINDOW) add(un, `${label} ends ${fd(x.until)}`);
   }
-  for (const t of todos) if (t.client_id === c.id && t.state !== "resolved" && !t.done && t.severity === "urgent"){
+  for (const t of todos) if (t.client_id === c.id && t.state !== "resolved" && !t.done && t.severity === "urgent" && t.kind !== "suspended"){
     const n = days(t.due); add(n ?? 0, t.kind === "missing" ? "New policy not filed with L&I" : t.title); }
   const nm = String(c.name || "").toLowerCase();
   for (const m of meta.inbox || []){
@@ -308,9 +313,10 @@ function renderToday(){
   const snoozed = r => days(r.c.followup?.date) > 0;
   const byN = (a, b) => a.n - b.n || a.c.name.localeCompare(b.c.name);
   const open = rows.filter(r => !snoozed(r));
-  const recent = open.filter(r => r.n < 0 && r.n >= -TODAY_WINDOW).sort((a, b) => b.n - a.n);
+  const insured = r => todos.some(t => t.client_id === r.c.id && t.kind === "suspended" && t.state !== "resolved" && !t.done);
+  const recent = open.filter(r => r.n < 0 && (r.n >= -TODAY_WINDOW || insured(r))).sort((a, b) => b.n - a.n);
   const due = open.filter(r => r.n >= 0).sort(byN);
-  const old = open.filter(r => r.n < -TODAY_WINDOW).sort((a, b) => b.n - a.n);
+  const old = open.filter(r => r.n < -TODAY_WINDOW && !insured(r)).sort((a, b) => b.n - a.n);
   const later = rows.filter(snoozed).sort(byN);
   const nCall = recent.length + due.length;
   $("#todayN").textContent = nCall ? `(${nCall})` : "";
@@ -329,7 +335,7 @@ function renderToday(){
   const fold = (title, list) => list.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">${title} (${list.length})</summary><div class="list">${list.map(card).join("")}</div></details>` : "";
   $("#today").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
     `<p class="notice" style="margin:12px 0 0">Who to call today: anyone whose L&amp;I liability, bond or registration ends or cancels within ${TODAY_WINDOW} days, or whose new policy isn't filed with L&amp;I yet. Soonest suspension first.</p>` +
-    sec("Lapsed in the last 30 days: call to reinstate", vr) +
+    sec("Lapsed in the last 30 days, or lapsed but still insured: call to reinstate", vr) +
     sec("Call before L&amp;I suspends them", vd) +
     (vr.length || vd.length ? "" : `<div class="empty">${nCall ? "No one matches." : "No calls needed today."}</div>`) +
     fold("Already contacted", vl) +
