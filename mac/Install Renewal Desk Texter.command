@@ -25,19 +25,26 @@ $PB -c "Delete :NSAppleEventsUsageDescription" "$INFO" 2>/dev/null || true
 $PB -c "Add :NSAppleEventsUsageDescription string Sends the Qtax texts you approve through Messages." "$INFO"
 codesign --force --deep --sign - "$APP"
 
-cat > "$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
+PLIST_XML="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<plist version=\"1.0\"><dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$APP/Contents/MacOS/applet</string></array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>60</integer>
   <key>ProcessType</key><string>Interactive</string>
-</dict></plist>
-EOF
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+</dict></plist>"
+# Keep it running with launchd. On some Macs ~/Library/LaunchAgents belongs to another account and can't be written;
+# then start it as a Login Item instead (it still starts at login and stays open).
+if { printf '%s\n' "$PLIST_XML" > "$PLIST"; } 2>/dev/null && launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null; then
+  echo "Set to start automatically (launchd)."
+else
+  osascript -e 'tell application "System Events" to delete (every login item whose name is "Renewal Desk Texter")' >/dev/null 2>&1 || true
+  osascript -e "tell application \"System Events\" to make login item at end with properties {path:\"$APP\", hidden:true}" >/dev/null \
+    && echo "Set to start automatically (Login Items)." || echo "Couldn't add it to Login Items; it runs now but won't start by itself after a restart."
+  open "$APP"
+fi
 
 echo
 echo "Installed. A Renewal Desk sign-in box will pop up: sign in once."
