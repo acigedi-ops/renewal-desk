@@ -122,8 +122,8 @@
   </header>
   ${adding ? addForm() : ""}
   ${discoveryCard()}
-  ${silentCard(active)}
   ${removedCard(removedOpen)}
+  ${silentCard(active)}
   ${draftCards(active)}
   ${progressCard()}
   <div class="section-h"><h2>Client list · ${qLabel(quarter)}</h2><span class="notice">${active.length} get the quarter text${clients.length > active.length ? ` · ${clients.length - active.length} removed` : ""}</span></div>
@@ -179,7 +179,7 @@
     const week = new Date(Date.now() - 7 * 864e5).toISOString();
     const list = clients.filter(c => c.active === false && c.removed_at > week).sort((a, b) => b.removed_at.localeCompare(a.removed_at));
     if (!list.length) return "";
-    return `<details class="card" id="qRemoved" ${removedOpen ? "open" : ""}><summary><b>Recently removed</b> <span class="chip plain">${list.length}</span> <span class="notice">last 7 days, tap to see</span></summary>
+    return `<details class="card" id="qRemoved" ${removedOpen ? "open" : ""}><summary style="cursor:pointer"><b>Recently removed</b> <span class="chip plain">${list.length}</span> <span class="notice">last 7 days · tap to open and add people back</span></summary>
       <div class="list">${list.map(c => `<div class="qrow off" data-qc="${h(c.id)}"><div><span class="name">${h(c.name || phoneFmt(c.phone))}</span>
         <div class="meta">${h(phoneFmt(c.phone))} · removed ${day(c.removed_at)}${c.removed_reason ? ` · ${h(c.removed_reason)}` : ""}</div></div>
         <div class="acts"><button class="btn ghost" data-qactive type="button">Add back</button></div></div>`).join("")}</div></details>`;
