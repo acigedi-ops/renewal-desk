@@ -41,7 +41,7 @@
   const STATUS = [["", "Not asked"], ["asked", "Asked"], ["received", "Got income"], ["filed", "Filed"], ["paid", "Paid"]];
   const OPEN = ["draft", "approved", "sending", "unsure"];
 
-  let db = null, clients = [], texts = [], settings = {}, mac = null, discovery = null, responders = null;
+  let db = null, clients = [], texts = [], amounts = [], settings = {}, mac = null, discovery = null, responders = null;
   let quarter = filingQuarter(), filter = null, editing = null, adding = false;
 
   // ---- Mode switch: a "Qtax" button next to Policies / SOS status ----
@@ -129,6 +129,7 @@
   </header>
   ${adding ? addForm() : ""}
   ${discoveryCard()}
+  ${incomeCard()}
   ${removedCard(removedOpen)}
   ${silentCard(active)}
   ${draftCards(active)}
@@ -180,6 +181,26 @@
         <div class="meta">${h(phoneFmt(c.phone))} · no reply to ${p.sent} texts · ${p.last_in ? `last texted you ${day(p.last_in)} ${new Date(p.last_in).getFullYear()}` : "never texted you"}</div></div>
         <div class="acts"><button class="btn ghost" data-qremove type="button">Remove</button></div></div>`; }).join("")}</div></section>`;
   }
+
+  // Income clients texted back, read by the Mac (qtaxq/<id>_<quarter>: reported_income, reported_text, reported_status).
+  // Nothing counts until Eduard checks it; replies the Mac couldn't read (no number, two numbers, a question) wait for him to type the amount.
+  const usd = n => "$" + Number(n).toLocaleString("en-US", Number.isInteger(+n) ? {} : {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const toCheck = () => amounts.filter(a => a.quarter === quarter && (a.reported_status === "unconfirmed" || a.reported_status === "unclear"))
+    .sort((a, b) => (a.reported_status === "unclear") - (b.reported_status === "unclear") || String(a.name).localeCompare(String(b.name)));
+  function incomeCard(){
+    const list = toCheck(); if (!list.length) return "";
+    const ok = list.filter(a => a.reported_status === "unconfirmed").length;
+    return `<section class="card"><h3><span>Income clients texted you <span class="chip info">${list.length} to check</span></span>
+        ${ok > 1 ? `<span><button class="btn primary" data-qincall type="button">All ${ok} look right</button></span>` : ""}</h3>
+      <span class="notice">Your Mac read these amounts from their replies. Check each against their words, then tap Looks right. Nothing is filed or saved as their income until you do.</span>
+      <div class="list">${list.map(a => { const c = clients.find(x => x.id === a.client_id) || {}, sure = a.reported_status === "unconfirmed";
+        return `<div class="qrow" data-qinc="${h(a.id)}"><div><span class="name">${h(c.name || a.name || phoneFmt(c.phone))}</span>
+          ${sure ? ` <b style="color:var(--ok)">${usd(a.reported_income)}</b>` : ` <span class="chip amber">Couldn't read an amount: ${h(a.reported_why || "check it")}</span>`}
+          <div class="meta">texted ${day(a.reported_at)}</div><div class="reply">${h(String(a.reported_text || "").slice(0, 300))}</div></div>
+          <div class="acts">${sure ? `<button class="btn primary" data-qincok type="button">Looks right</button><button class="btn ghost" data-qincedit type="button">Change</button>`
+            : `<button class="btn primary" data-qincedit type="button">Enter amount</button><button class="btn ghost" data-qincskip type="button">Not income</button>`}</div></div>`; }).join("")}</div></section>`;
+  }
+  const confirmIncome = (a, n) => db.doc("qtaxq/" + a.id).update({income: n, reported_status: "confirmed", confirmed_at: new Date().toISOString()});
 
   // Removed in the last 7 days, so a wrong tap is easy to undo. Older removals stay at the bottom of the client list.
   function removedCard(removedOpen){
@@ -265,6 +286,19 @@
   root.addEventListener("click", async e => {
     const t = e.target;
     try {
+      const inc = t.closest("[data-qinc]"), a = inc && amounts.find(x => x.id === inc.dataset.qinc);
+      if (a && t.closest("[data-qincok]")){ t.disabled = true; return confirmIncome(a, a.reported_income); }
+      if (a && t.closest("[data-qincskip]")) return db.doc("qtaxq/" + a.id).update({reported_status: "dismissed"});
+      if (a && t.closest("[data-qincedit]")){
+        const v = prompt(`Income for ${a.name || "this client"} (${qLabel(quarter)}):`, a.reported_income === "" ? "" : a.reported_income); if (v === null) return;
+        const n = +String(v).replace(/[^\d.]/g, ""); if (String(v).trim() === "" || isNaN(n)) return alert("Type a number, for example 15000.");
+        return confirmIncome(a, n);
+      }
+      if (t.closest("[data-qincall]")){
+        const list = toCheck().filter(x => x.reported_status === "unconfirmed");
+        if (!confirm(`Save ${list.length} amounts as their income for ${qLabel(quarter)}? Check them against their words first.`)) return;
+        t.disabled = true; return inChunks(list, x => confirmIncome(x, x.reported_income));
+      }
       const tile = t.closest("[data-qf]"); if (tile){ filter = filter === tile.dataset.qf ? null : tile.dataset.qf; return render(); }
       if (t.closest("#qAdd")){ adding = !adding; render(); return q("#qPaste")?.focus(); }
       if (t.closest("#qAddCancel")){ adding = false; return render(); }
@@ -383,6 +417,7 @@
     if (!db) return;
     db.collection("qtax").onSnapshot(s => { clients = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, () => {});
     db.collection("texts").onSnapshot(s => { texts = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, () => {});
+    db.collection("qtaxq").onSnapshot(s => { amounts = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, () => {});
     db.collection("qtaxmeta").onSnapshot(s => {
       const m = Object.fromEntries(s.docs.map(d => [d.id, d.data()]));
       settings = m.settings || {}; mac = m.mac || null; discovery = m.discovery || null; responders = m.responders || null; render();

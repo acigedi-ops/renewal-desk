@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 8;
+const VERSION = 9;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -201,6 +201,39 @@ function isStop(text){
   const t = String(text || "").toLowerCase().replace(/[^a-zа-яіїєґё' ]+/g, " ").replace(/\s+/g, " ").trim();
   return t.length > 0 && t.length <= 40 && STOP_WORDS.some(w => t === w || (w.includes(" ") && t.startsWith(w + " ")));
 }
+// ---- readIncome: the amount a client's reply reports (begin) ----
+// Returns {amount} only when the reply holds exactly one amount (or plainly says there was no income); anything else
+// is {why} for Eduard to read himself: no number, more than one number, a question, a photo. It never guesses.
+const ZERO_RE = /^(0|\$0|zero|none|nothing|no income|нуль|нічого|ничего|нема|немає|нет|не було|не было|без доходу|без дохода|не було доходу|доходу не було|немає доходу|нічого не було|ничего не было|не працював|не працювала|не работал|не работала)$/;
+function readIncome(text){
+  const raw = String(text || "").trim();
+  if (!raw || /^\[photo or file\]$/.test(raw)) return {why: "sent a photo or file"};
+  const lines = raw.split("\n").map(s => s.trim()).filter(s => s && s !== "[photo or file]");
+  if (lines.length < raw.split("\n").filter(s => s.trim()).length && !lines.some(s => /\d/.test(s))) return {why: "sent a photo or file"};
+  let t = " " + lines.join(" \n ").toLowerCase() + " ";
+  if (/\?/.test(t)) return {why: "asked a question"};
+  if (/грн|гривн|uah|hryvn/.test(t)) return {why: "gave an amount in hryvnia"};
+  const L = "a-zа-яіїєґё";  // no lookbehind: older macOS JavaScript lacks it
+  t = t.replace(/\+?1?[\s(.-]*\(?\d{3}\)?[\s).-]*\d{3}[\s.-]*\d{4}(?!\d)/g, " ")                                     // phone numbers
+       .replace(/(^|[^\d$.,])(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}\.\d{1,2}\.\d{2,4})(?![\d.,])/g, "$1 ")          // dates 10/15, 15.10.2026
+       .replace(new RegExp(`(^|[^${L}])(?:q|кв)\\s*-?\\s*[1-4](?!\\d)`, "g"), "$1 ")                                    // Q3, кв 3
+       .replace(new RegExp(`(^|\\D)[1-4]\\s*-?\\s*(?:й|ий|ій|th|rd|nd|st)?\\s*(?:квартал|quarter|кв)`, "g"), "$1 ")      // 3 квартал
+       .replace(new RegExp(`(^|[^\\d$,.])20[2-3]\\d(?![\\d,.])(?!\\s*(?:\\$|k(?![${L}])|к(?![${L}])|тис|тыс|dollar|долар|доллар))`, "g"), "$1 "); // years
+  const amounts = [];
+  const re = /(\$\s*)?(\d{1,3}(?:[ ,. ]\d{3})+|\d+)(?:[.,](\d{1,2}))?(?!\d)\s*(k(?![a-zа-яіїєґё])|к(?![a-zа-яіїєґё])|тис|тыс|thousand)?/g;
+  let m;
+  while ((m = re.exec(t))){
+    let n = +m[2].replace(/[ ,. ]/g, "") + (m[3] ? +("0." + m[3]) : 0);
+    if (m[4]) n *= 1000;
+    if (!amounts.includes(n)) amounts.push(n);
+  }
+  if (amounts.length === 1) return {amount: amounts[0]};
+  if (amounts.length > 1) return {why: "wrote more than one number"};
+  const words = t.replace(/[^a-zа-яіїєґё0-9$ ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (ZERO_RE.test(words) || /^(дохід|доход|income)\s*(0|нуль|zero|none|немає|нет)$/.test(words)) return {amount: 0};
+  return {why: "no number in the reply"};
+}
+// ---- readIncome (end) ----
 function scanReplies(clients){
   const st = readJson(STATE, {});
   if (st.cursor == null){
@@ -231,10 +264,23 @@ function scanReplies(clients){
     Object.keys(c).filter(k => /^q_\d{4}Q\d$/.test(k)).forEach(k => {
       const q = Object.assign({}, c[k], p[k]);
       if (q.status === "asked" && q.asked_at && q.asked_at <= at){ p[k] = Object.assign(q, {status: "received", received_at: at, reply: text}); }
-      else if (p[k] && p[k].status === "received" && p[k].reply !== text && text !== "[photo or file]") p[k].reply = (p[k].reply + "\n" + text).slice(0, 500);
+      // Later texts in the next two weeks ("hi" first, the amount after) join the reply, so the amount is still found.
+      else if (q.status === "received" && q.received_at && at >= q.received_at && Date.parse(at) - Date.parse(q.received_at) < 14 * 864e5
+        && text !== "[photo or file]" && !String(q.reply || "").split("\n").includes(text)) p[k] = Object.assign(q, {reply: (String(q.reply || "") + "\n" + text).slice(-500)});
     });
   }
   for (const id in patches){ mergeDoc("qtax", id, patches[id]); log(`reply from ${id}`); }
+  // Put the income they reported into the app (qtaxq/<id>_<quarter>, the "+ Amounts" record), with their exact words,
+  // as unconfirmed until Eduard checks it; unclear replies are flagged for him instead of guessed.
+  for (const id in patches) Object.keys(patches[id]).filter(k => /^q_\d{4}Q\d$/.test(k) && patches[id][k].status === "received" && patches[id][k].reply).forEach(k => {
+    try {
+      const quarter = k.slice(2, 6) + "-" + k.slice(6), docId = id + "_" + quarter, old = getDoc("qtaxq", docId) || {}, qd = patches[id][k];
+      if (old.reported_status === "confirmed" || old.reported_text === qd.reply) return;
+      const r = readIncome(qd.reply), c = clients.find(x => x.id === id) || {};
+      mergeDoc("qtaxq", docId, {client_id: id, name: c.name || "", quarter, reported_income: r.amount === undefined ? "" : r.amount,
+        reported_status: r.amount === undefined ? "unclear" : "unconfirmed", reported_why: r.why || "", reported_text: qd.reply, reported_at: qd.received_at || nowIso()});
+    } catch (e){ log(`income read failed for ${id}: ${e}`); }
+  });
   writeJson(STATE, st);
 }
 
