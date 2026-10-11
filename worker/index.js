@@ -45,11 +45,23 @@ async function send(request, env){
   if (bad) return json(400, {error: `not an email address: ${bad}`});
 
   // Claim it, so a double tap can't send twice: the write only matches while the status is still pending/failed.
+  // Only "pending" and "failed" can be sent. "unsure" (it may have gone out) needs Eduard to check his Sent mail first.
   const claim = await sb("PATCH", `/rest/v1/docs?collection=eq.outbox&id=eq.${encodeURIComponent(id)}&data->>status=in.(pending,failed)`,
-    {data: {...item, status: "sending", error: ""}, updated_at: new Date().toISOString()}, {Prefer: "return=representation"});
+    {data: {...item, status: "sending", error: "", claimed_at: new Date().toISOString()}, updated_at: new Date().toISOString()}, {Prefer: "return=representation"});
   if (!claim.ok || !(await claim.json()).length) return json(409, {error: "already being sent"});
 
-  const finish = patch => sb("POST", "/rest/v1/rpc/merge_doc", {p_collection: "outbox", p_id: id, p_patch: patch});
+  // Save the outcome, retrying a few times: once Gmail has the email, losing the "sent" mark would invite a second send.
+  const finish = async patch => {
+    for (let i = 0; i < 3; i++){
+      try {
+        const r = await sb("POST", "/rest/v1/rpc/merge_doc", {p_collection: "outbox", p_id: id, p_patch: patch});
+        if (r.ok) return true;
+      } catch {}
+      await new Promise(ok => setTimeout(ok, 500 * (i + 1)));
+    }
+    return false;
+  };
+  let sent;
   try {
     const attachments = [];
     for (const a of item.attachments || []){
@@ -63,14 +75,20 @@ async function send(request, env){
     const data = buildMime({from, fromName: env.FROM_NAME, to, cc, subject: item.subject, body: item.body, html: bodyHtml(item.body), attachments});
     const socket = connect({hostname: "smtp.gmail.com", port: 465}, {secureTransport: "on"});
     const result = await smtpSend(socket, {user: from, pass: env.GMAIL_APP_PASSWORD.replace(/\s+/g, ""), from, rcpts: [...to, ...cc], data});
-    const sent = {status: "sent", sent_at: new Date().toISOString(), sent_by: who.user?.email || "", smtp: result.slice(0, 200), error: ""};
-    await finish(sent);
-    return json(200, sent);
+    sent = {status: "sent", sent_at: new Date().toISOString(), sent_by: who.user?.email || "", smtp: result.slice(0, 200), error: ""};
   } catch (e){
     const error = String(e?.message || e).slice(0, 500);
+    if (e?.maybeSent){
+      // Gmail got the whole email but we never heard back: it may well have gone out, so it must not be sendable again by one tap.
+      await finish({status: "unsure", error, unsure_at: new Date().toISOString()});
+      return json(502, {error: `It may have gone out (${error}). Check your Sent mail before sending again.`, unsure: true});
+    }
     await finish({status: "failed", error, failed_at: new Date().toISOString()});
     return json(502, {error});
   }
+  // Sent. If saving that fails even after retries, it stays "sending" and the Outbox shows it as "check your Sent mail".
+  if (!(await finish(sent))) return json(200, {...sent, warning: "Sent, but the Outbox couldn't save it as sent."});
+  return json(200, sent);
 }
 
 const list = v => (Array.isArray(v) ? v : String(v || "").split(/[,;\s]+/)).map(s => String(s).trim()).filter(Boolean);
