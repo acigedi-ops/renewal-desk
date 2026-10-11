@@ -160,6 +160,14 @@ if __name__ == "__main__":
     try:
         main(sys.argv[1:])
         rd.set_doc("meta", "backup", {"at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "error": ""})
+    except SystemExit as e:
+        if e.code in (0, None):   # --help and other clean exits are not a failed backup
+            raise
+        try:
+            rd.update_doc("meta", "backup", {"error": str(e.code)[:300],
+                                             "failed_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+        finally:
+            raise
     except BaseException as e:
         try:
             rd.update_doc("meta", "backup", {"error": (str(e) or type(e).__name__)[:300],

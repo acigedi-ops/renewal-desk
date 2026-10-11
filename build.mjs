@@ -27,9 +27,9 @@ const boot = `<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.
 // The artifact source starts with <title>, styles and markup; everything before the first <script> is head + body markup.
 const pre = app.slice(0, at), rest = app.slice(at);
 const split = pre.indexOf("</style>") + "</style>".length;
-// The Outbox (src/outbox.js) and Qtax mode (src/qtax.js) load after the app's scripts; they live outside app.html because the L&I routine overwrites that file.
+// The Outbox (src/outbox.js), Qtax mode (src/qtax.js + qtaxplus.js), To do, health strip, client timeline, client documents and search load after the app's scripts; they live outside app.html because the L&I routine overwrites that file.
 // The phone layout (src/mobile.css, plus src/mobile.js for the hide-on-scroll header) is linked last so it wins over every other stylesheet, including the ones those scripts add.
-const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n<script src="/tasks.js"></script>\n<script src="/health.js"></script>\n<script src="/mobile.js"></script>\n<link rel="stylesheet" href="/mobile.css">\n</body></html>\n';
+const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n<script src="/qtaxplus.js"></script>\n<script src="/tasks.js"></script>\n<script src="/health.js"></script>\n<script src="/timeline.js"></script>\n<script src="/clientdocs.js"></script>\n<script src="/search.js"></script>\n<script src="/mobile.js"></script>\n<link rel="stylesheet" href="/mobile.css">\n</body></html>\n';
 
 mkdirSync("dist", {recursive: true});
 cpSync("public", "dist", {recursive: true});
@@ -38,6 +38,7 @@ cpSync("src/outbox.js", "dist/outbox.js");
 cpSync("src/qtax.js", "dist/qtax.js");
 cpSync("src/tasks.js", "dist/tasks.js");
 cpSync("src/health.js", "dist/health.js");
+for (const f of ["qtaxplus.js", "timeline.js", "clientdocs.js", "search.js"]) cpSync("src/" + f, "dist/" + f);
 cpSync("src/mobile.css", "dist/mobile.css");
 cpSync("src/mobile.js", "dist/mobile.js");
 writeFileSync("dist/index.html", html);
