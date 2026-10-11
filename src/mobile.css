@@ -4,8 +4,11 @@
 @media (max-width:600px){
   body{padding-inline:max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 24px);-webkit-text-size-adjust:100%;font-size:14px}
 
-  /* The header (title, tiles, tabs, search) is a third of the screen: let it scroll away instead of staying pinned. */
-  header.top{position:static;padding-block:10px 6px;gap:8px}
+  /* The top section (mode switch through search) stays pinned, slides away while scrolling down and returns on scroll up (src/mobile.js). */
+  .modes{position:sticky;top:0;z-index:6;background:var(--bg);padding-bottom:4px}
+  header.top{top:var(--rd-modes-h, 52px);padding-block:6px 6px;gap:8px;box-shadow:0 6px 8px -8px rgb(0 0 0 / .25)}
+  .modes,header.top{transition:transform .2s ease}
+  .rd-bar-hidden .modes,.rd-bar-hidden header.top{transform:translateY(calc(-1 * var(--rd-bar-h, 100vh) - 8px))}
   .brand{gap:2px 12px}
   .brand h1{font-size:18px}
 
