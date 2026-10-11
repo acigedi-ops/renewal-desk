@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 6;
+const VERSION = 7;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -277,8 +277,14 @@ function sendApproved(readable){
     if (!c || c.active === false){ done({status: "skipped", error: "Not an active Qtax client"}); continue; }
     if (t.kind === "followup" && q.status !== "asked"){ done({status: "skipped", error: "Already answered"}); continue; }
     if (t.kind === "ask" && q.status){ done({status: "skipped", error: q.status === "asked" ? "Already asked this quarter" : "Already answered"}); continue; }
-    const phone = c.phone || t.phone;
+    // Send only to the number Eduard approved (t.phone). If the client's number changed since, don't guess: back to draft for a new OK.
+    const phone = t.phone;
     if (last10(phone).length < 10){ done({status: "failed", error: "No phone number"}); continue; }
+    if (c.phone && last10(c.phone) !== last10(phone)){
+      done({status: "draft", note: "The client's number changed after you approved. Approve again to send to the new number."});
+      try { mergeDoc("texts", t.id, {phone: c.phone}); } catch (e){}
+      continue;
+    }
     const startMs = Date.now();
     let accepted = false, via = "";
     try {
