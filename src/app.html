@@ -147,7 +147,7 @@ a{color:var(--accent)}
   <main id="todo" hidden></main>
   <main id="ren" hidden></main>
   <main id="inbox" hidden></main>
-  <p class="foot" id="foot">L&amp;I data comes from Washington L&amp;I's public contractor records and is refreshed at 8:50am and 5:50pm Pacific. Your notes, contacts and other policies are saved here.</p>
+  <p class="foot" id="foot">L&amp;I data comes from Washington L&amp;I's public contractor records and is refreshed at 8:50am, 12:50pm and 5:50pm Pacific. Your notes, contacts and other policies are saved here.</p>
   </div>
   <div id="sosMode" hidden></div>
 </div>
@@ -158,12 +158,19 @@ a{color:var(--accent)}
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const WARN = 60, URGENT = 7;
+// One meaning of urgent everywhere: "Action now" is lapsed or ending within 14 days (the same window Today uses), "Due" is within 60.
+const WARN = 60, URGENT = 14;
 let assets = null, agency = {}, dl = null, db = null, clients = [], meta = {}, filter = null, openId = null, canWrite = true, todos = [];
 const DEAD = new Set(["Canceled","Cancelled","Expired"]);
 
 function today(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
-function pd(s){ if(!s || s === "until cancelled") return null; const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m ? new Date(+m[1], m[2]-1, +m[3]) : null; }
+// A plain date ("2026-10-11") is that day. A timestamp ("2026-10-12T01:30:00Z") is the day it was on this device's clock,
+// so something saved at 6:30pm Pacific counts as today, not tomorrow.
+function pd(s){ if(!s || s === "until cancelled") return null; s = String(s);
+  if (/^\d{4}-\d{2}-\d{2}T\d/.test(s) && /(Z|[+-]\d{2}:?\d{2})$/.test(s)){ const t = new Date(s); if (!isNaN(t)) return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); return m ? new Date(+m[1], m[2]-1, +m[3]) : null; }
+// Today's (or a Date's) calendar day on this device, as YYYY-MM-DD.
+function localYmd(d = new Date()){ return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function days(s){ const d = pd(s); return d ? Math.round((d - today()) / 864e5) : null; }
 function fd(s){ if(!s) return "—"; if(s === "until cancelled") return "Until cancelled"; const d = pd(s); return d ? d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : s; }
 function rel(n){ return n == null ? "" : n < 0 ? `${-n}d ago` : n === 0 ? "today" : `in ${n}d`; }
@@ -267,7 +274,7 @@ function todoCard(t){
   </div>`;
 }
 // ---- L&I licenses: everything that could get a license suspended, then the policies L&I has wrong ----
-const TODAY_WINDOW = 30, REG_WINDOW = 60, TODAY_SOON = 14;
+const TODAY_WINDOW = 30, REG_WINDOW = 60, TODAY_SOON = URGENT;
 const openTodos = id => todos.filter(t => t.client_id === id && t.state !== "resolved" && !t.done);
 const insuredLapsed = id => openTodos(id).some(t => t.kind === "suspended");
 const matchQ = (q, ...vals) => !q || vals.some(v => String(v || "").toLowerCase().includes(q));
@@ -299,7 +306,11 @@ function licReasons(c){
   const rn = days(reg.expires); if (rn != null && rn <= REG_WINDOW) add("reg", rn, rn < 0 ? "Registration expired" : `Registration renews ${fd(reg.expires)}`);
   return out;
 }
-function licRows(){
+// Data version: bumped whenever any collection changes, so the expensive lists below are built once per change, not once per tab.
+let dataVer = 0;
+const memo = (fn) => { let ver = -1, val; return () => (ver === dataVer ? val : (ver = dataVer, val = fn())); };
+const licRows = memo(licRowsNow);
+function licRowsNow(){
   const rows = [];
   for (const c of clients){
     const rs = licReasons(c); if (!rs.length) continue;
@@ -355,7 +366,7 @@ function renderTodo(){
     sec("Marked fixed, waiting for L&amp;I to update", tDone, todoCard);
 
   $("#todo").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
-    `<p class="notice" style="margin:12px 0 0">Every L&amp;I license that needs something from you so it doesn't get suspended, soonest first. Updated at every L&amp;I check (8:50am and 5:50pm).</p>` +
+    `<p class="notice" style="margin:12px 0 0">Every L&amp;I license that needs something from you so it doesn't get suspended, soonest first. Updated at every L&amp;I check (8:50am, 12:50pm and 5:50pm).</p>` +
     sec("Suspended or expired: call to reinstate", lapsed, callCard) +
     sec("Will be suspended: insurance or bond ends within 30 days and nothing new is on L&amp;I", cov, callCard) +
     sec("License renewals due in the next 60 days", reg, callCard) +
@@ -369,11 +380,11 @@ function renderTodo(){
 
 // ---- Renewals: every policy and bond ending in the next 60 days (or lapsed in the last 30), each with a checklist ----
 // Your ticks are saved in the `renewals` collection, one doc per client + coverage + old end date.
-// "Shows on L&I" is never ticked by hand: it is worked out from the L&I data that refreshes twice a day.
+// "Shows on L&I" is never ticked by hand: it is worked out from the L&I data that refreshes three times a day.
 const REN_AHEAD = 60, REN_BACK = 30, STUCK_DAYS = 3;
 let renDocs = [], outboxItems = [];
 const isGL = t => /general liab/i.test(t || ""), isBond = t => /bond/i.test(t || "");
-const ymd = s => String(s || "").slice(0, 10);
+const ymd = s => { const d = pd(s); return d ? localYmd(d) : String(s || "").slice(0, 10); };
 const addDays = (s, n) => { const d = pd(s); if (!d) return ""; d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const srcName = p => p.source === "portal" ? "Portal" : p.source === "email" ? "Email" : "Added here";
 // When a coverage on L&I ends: the cancel date if it comes first, else the end date. Null for bonds "until cancelled".
@@ -474,7 +485,8 @@ function renCard(r){
     <div class="steps">${steps}</div>
   </section>`;
 }
-function renData(){
+const renData = memo(renDataNow);
+function renDataNow(){
   const rows = renItems().map(renRow);
   const open = rows.filter(r => !r.complete);
   return {rows, open, urgent: open.filter(r => r.stuck || (r.n != null && r.n <= TODAY_WINDOW))};
@@ -510,8 +522,8 @@ function renderRen(){
 async function onStep(b){
   {
     const key = b.closest("[data-ren]").dataset.ren, k = b.dataset.step;
-    const r = renItems().map(renRow).find(x => x.it.key === key); if (!r) return;
-    if (!db){ b.textContent = "Saving is unavailable in this view."; return; }
+    const r = renData().rows.find(x => x.it.key === key); if (!r) return;
+    if (!db){ b.textContent = "Not connected. Reload the page."; return; }
     const {it} = r, steps = {...r.st, [k]: r.st[k] ? "" : new Date().toISOString()};
     b.disabled = true;
     try { await db.doc("renewals/" + key).update({client_id: it.client_id, client: r.c.name, kind: it.kind, label: it.label, ends: it.ends, cancel: !!it.cancel,
@@ -554,7 +566,7 @@ function renderToday(){
 async function onCalled(b){
   const c = clients.find(x => x.id === b.dataset.id); if (!c) return;
   const d = new Date(); d.setDate(d.getDate() + 3);
-  const followup = b.dataset.called === "1" ? {status: "Contacted", date: d.toISOString().slice(0, 10)} : {...(c.followup || {}), date: ""};
+  const followup = b.dataset.called === "1" ? {status: "Contacted", date: localYmd(d)} : {...(c.followup || {}), date: ""};
   b.disabled = true; if (!(await save(c, {followup}))) { b.disabled = false; b.textContent = "Could not save"; }
 }
 $("#today").addEventListener("click", async e => {
@@ -624,7 +636,7 @@ function openClient(id){
     </section>
     <section class="card"><h3>Commercial policies <button class="btn ghost" id="addPol">+ Add policy</button></h3>
       <div id="pols">${(c.policies||[]).length ? c.policies.map((p,i)=>`<div class="pol"><span><b>${esc(p.type)}</b>${p.status ? ` <span class="chip ${DEAD.has(p.status) ? "plain" : "ok"}">${esc(p.status)}</span>` : ""} · ${esc(p.carrier||"")} <span class="mono">${esc(p.number||"")}</span>${p.premium?` · $${esc(p.premium)}`:""}${p.notes?`<br><span class="notice">${esc(p.notes)}</span>`:""}</span>
-        <span class="mono" style="text-align:right">${fd(p.expiration)}<br><button class="btn ghost" data-delpol="${i}" style="font-size:12px">Remove</button></span></div>`).join("") : `<span class="notice">Liability and bond above come from L&amp;I. Add workers comp, auto, umbrella, builders risk and other policies here to track their renewals too.</span>`}</div>
+        <span class="mono" style="text-align:right">${fd(p.expiration)}<br><button class="btn ghost" data-editpol="${esc(polId(p))}" style="font-size:12px">Edit</button><button class="btn ghost" data-delpol="${esc(polId(p))}" style="font-size:12px">Remove</button></span></div>`).join("") : `<span class="notice">Liability and bond above come from L&amp;I. Add workers comp, auto, umbrella, builders risk and other policies here to track their renewals too.</span>`}</div>
       <form class="form" id="polForm" hidden>
         <label>Type<select id="p-type">${["Workers comp","Commercial auto","Umbrella","Builders risk","Inland marine","General liability","Professional liability","Other"].map(s=>`<option>${s}</option>`).join("")}</select></label>
         <label>Carrier<input id="p-carrier"></label>
@@ -633,12 +645,12 @@ function openClient(id){
         <label>Expires<input id="p-exp" type="date" required></label>
         <label>Premium<input id="p-prem" inputmode="decimal"></label>
         <label class="full">Notes<input id="p-notes"></label>
-        <div class="actions full"><button class="btn" type="button" id="polCancel">Cancel</button><button class="btn primary" type="submit">Add policy</button></div>
+        <div class="actions full"><span class="notice" id="polMsg"></span><button class="btn" type="button" id="polCancel">Cancel</button><button class="btn primary" type="submit" id="polSubmit">Add policy</button></div>
       </form>
     </section>
     <section class="card"><h3>Notes</h3>
       <form class="form" id="noteForm"><label class="full"><span class="notice">Add a note</span><textarea id="note-text" rows="2" placeholder="Called owner, renewal payment promised Friday"></textarea></label>
-        <div class="actions full"><button class="btn primary" type="submit">Add note</button></div></form>
+        <div class="actions full"><span class="notice" id="noteMsg"></span><button class="btn primary" type="submit">Add note</button></div></form>
       <div style="display:grid;gap:8px">${(c.notes||[]).slice().reverse().map(n=>`<div class="note"><time>${new Date(n.at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</time>${esc(n.text)}</div>`).join("")}</div>
     </section>
     <div class="actions"><button class="btn ghost" id="delClient" style="color:var(--red)">Remove client</button></div>`;
@@ -703,13 +715,13 @@ function coiForm(c){
     const g = {}; ["holder","insured_address","insurer","naic","policy","effective","expiration","claims","occ","rented","med","pai","agg","prod","desc"].forEach(k => g[k] = $("#cf-" + k).value.trim());
     g.ai = $("#cf-ai").checked; g.wos = $("#cf-wos").checked;
     if (!g.holder || !g.policy || !g.expiration){ $("#cfMsg").textContent = "Holder, policy number and expiration are required."; return; }
-    const blob = coiPdf(c, g), date = new Date().toISOString().slice(0,10);
+    const blob = coiPdf(c, g), date = localYmd();
     const file = `COI-${c.name.replace(/[^A-Za-z0-9]+/g,"-")}-${g.holder.split("\n")[0].replace(/[^A-Za-z0-9]+/g,"-").slice(0,40)}-${date}.pdf`;
     let url = "", id = "";
     if (assets){ try { const up = await assets.upload(blob, {filename: file}); url = up.url; id = up.id; } catch { $("#cfMsg").textContent = "Saved the record but could not store the PDF."; } }
     const rec = {kind:"generated", file, url, asset_id:id, holder:g.holder.replace(/\n/g, ", "), policy:g.policy, insurer:g.insurer, effective:g.effective, expiration:g.expiration,
       producer: agency.name, cert_date: date, gen: g};
-    await save(c, {cois: [...(c.cois||[]), rec]});
+    await saveList(c, "cois", list => [...list, rec], $("#cfMsg"));
     try { if (dl) await dl.save({filename: file, data: blob}); else window.open(URL.createObjectURL(blob)); } catch {}
   };
 }
@@ -767,11 +779,11 @@ function openAgency(){
   $("#panel").innerHTML = `<div class="panel-h"><h2>Agency details</h2><button class="btn" id="close">Close</button></div>
     <form class="form card" id="agForm">
       <p class="notice full">Printed as the producer on certificates you create.</p>
-      <label class="full">Agency name<input id="ag-name" value="${esc(agency.name || "Rhino Insurance LLC")}"></label>
+      <label class="full">Agency name<input id="ag-name" value="${esc(agency.name || "Rhino Insurance Group LLC")}"></label>
       <label class="full">Street address<input id="ag-address" value="${esc(agency.address || "")}"></label>
       <label class="full">City, state, ZIP<input id="ag-city" value="${esc(agency.city || "")}"></label>
       <label>Phone<input id="ag-phone" type="tel" value="${esc(agency.phone || "")}"></label>
-      <label>Email<input id="ag-email" type="email" value="${esc(agency.email || "acigedi@gmail.com")}"></label>
+      <label>Email<input id="ag-email" type="email" value="${esc(agency.email || "Eduard@rhino.insure")}"></label>
       <label>Authorized representative<input id="ag-rep" value="${esc(agency.rep || "Eduard Kaplun")}"></label>
       <label>WA agency license #<input id="ag-license" value="${esc(agency.license || "")}"></label>
       <div class="actions full"><span class="notice" id="agMsg"></span><button class="btn primary" type="submit">Save</button></div>
@@ -783,11 +795,29 @@ function openAgency(){
 }
 
 function closeSheet(){ openId = null; $("#sheet").hidden = true; }
+// Redraw the open client sheet with fresh data, unless you're typing in one of its forms.
+function refreshSheet(){
+  const a = document.activeElement;
+  if (openId && !(a?.closest?.("#panel form") && a.matches("input,textarea,select"))) openClient(openId);
+}
+
+// Change one list on a client (policies, notes, COIs) starting from what's saved right now, not from the copy on screen,
+// so a routine or another device that changed the same client a moment ago doesn't get overwritten.
+async function saveList(c, key, change, msgEl){
+  if (!db){ if (msgEl) msgEl.textContent = "Not connected. Reload the page."; return false; }
+  let cur;
+  try { const snap = await db.doc("clients/" + c.id).get(); cur = (snap.exists && snap.data()[key]) || []; }
+  catch { if (msgEl) msgEl.textContent = "Could not save. Check your connection and try again."; return false; }
+  return save(c, {[key]: change(cur.slice())}, msgEl);
+}
+// A policy's id: its own, or (for ones saved before ids existed) what it says, which is the same on every device.
+const polId = p => p.id || ["type", "carrier", "number", "effective", "expiration"].map(k => p[k] || "").join("|");
+const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/-/g, "").slice(0, 12);
 
 async function save(c, patch, msgEl){
-  if (!db){ if (msgEl) msgEl.textContent = "Saving is unavailable in this view."; return false; }
+  if (!db){ if (msgEl) msgEl.textContent = "Not connected. Reload the page."; return false; }
   try { await db.doc("clients/" + c.id).update(patch); if (msgEl) msgEl.textContent = "Saved"; return true; }
-  catch(e){ if (msgEl) msgEl.textContent = e.code === "invalid_argument" ? "You have view-only access." : "Could not save. Try again."; return false; }
+  catch(e){ if (msgEl) msgEl.textContent = "Could not save. Check your connection and try again."; return false; }
 }
 
 function wireSheet(c){
@@ -803,16 +833,39 @@ function wireSheet(c){
   $("#fuForm").onsubmit = async e => { e.preventDefault();
     await save(c, {followup:{status:$("#fu-status").value, date:$("#fu-date").value},
       contact:{name:$("#ct-name").value.trim(), phone:$("#ct-phone").value.trim(), email:$("#ct-email").value.trim()}}, $("#fuMsg")); };
-  $("#addPol").onclick = () => { $("#polForm").hidden = false; $("#p-carrier").focus(); };
-  $("#polCancel").onclick = () => { $("#polForm").hidden = true; };
-  $("#polForm").onsubmit = async e => { e.preventDefault();
-    const p = {type:$("#p-type").value, carrier:$("#p-carrier").value.trim(), number:$("#p-number").value.trim(), effective:$("#p-eff").value, expiration:$("#p-exp").value, premium:$("#p-prem").value.trim(), notes:$("#p-notes").value.trim()};
-    await save(c, {policies:[...(c.policies||[]), p]}); };
+  const polForm = $("#polForm"), F = {type: "p-type", carrier: "p-carrier", number: "p-number", effective: "p-eff", expiration: "p-exp", premium: "p-prem", notes: "p-notes"};
+  const openPolForm = p => {
+    polForm.dataset.edit = p ? polId(p) : "";
+    for (const [k, id] of Object.entries(F)){
+      const el = $("#" + id);
+      if (k === "type" && p?.type && ![...el.options].some(o => o.value === p.type)) el.insertAdjacentHTML("beforeend", `<option>${esc(p.type)}</option>`);
+      el.value = p ? (p[k] || "") : k === "type" ? el.options[0].value : "";
+    }
+    $("#polSubmit").textContent = p ? "Save changes" : "Add policy"; $("#polMsg").textContent = "";
+    polForm.hidden = false; $("#p-carrier").focus();
+  };
+  $("#addPol").onclick = () => openPolForm(null);
+  $("#polCancel").onclick = () => { polForm.hidden = true; };
+  polForm.onsubmit = async e => { e.preventDefault();
+    const f = Object.fromEntries(Object.entries(F).map(([k, id]) => [k, $("#" + id).value.trim()]));
+    const edit = polForm.dataset.edit, btn = $("#polSubmit"); btn.disabled = true;
+    // Editing keeps everything else on the policy (where it came from, its status, the Gmail link).
+    const ok = await saveList(c, "policies", list => edit
+      ? list.map(p => polId(p) === edit ? {...p, ...f, id: p.id || newId()} : p)
+      : [...list, {...f, id: newId()}], $("#polMsg"));
+    btn.disabled = false;
+    if (ok){ polForm.hidden = true; document.activeElement?.blur(); refreshSheet(); } };
+  document.querySelectorAll("[data-editpol]").forEach(b => b.onclick = () => openPolForm((c.policies || []).find(p => polId(p) === b.dataset.editpol)));
   document.querySelectorAll("[data-delpol]").forEach(b => b.onclick = async () => {
     if (b.dataset.confirm !== "1"){ b.dataset.confirm = "1"; b.textContent = "Tap to confirm"; return; }
-    const ps = (c.policies||[]).slice(); ps.splice(+b.dataset.delpol, 1); await save(c, {policies: ps}); });
+    b.disabled = true;
+    // Removes exactly the policy you tapped, found by its id, even if the list changed since the sheet opened.
+    if (await saveList(c, "policies", list => list.filter(p => polId(p) !== b.dataset.delpol))) refreshSheet(); else { b.disabled = false; b.textContent = "Could not remove"; } });
   $("#noteForm").onsubmit = async e => { e.preventDefault(); const t = $("#note-text").value.trim(); if (!t) return;
-    await save(c, {notes:[...(c.notes||[]), {at:new Date().toISOString(), text:t}]}); };
+    const btn = e.submitter; if (btn) btn.disabled = true;
+    const ok = await saveList(c, "notes", list => [...list, {at: new Date().toISOString(), text: t}], $("#noteMsg"));
+    if (btn) btn.disabled = false;
+    if (ok){ $("#note-text").value = ""; document.activeElement?.blur(); refreshSheet(); } };
   $("#delClient").onclick = async e => { const b = e.currentTarget;
     if (b.dataset.confirm !== "1"){ b.dataset.confirm = "1"; b.textContent = "Tap again to remove this client"; return; }
     try { await db.doc("clients/" + c.id).delete(); closeSheet(); } catch { b.textContent = "Could not remove"; } };
@@ -832,7 +885,7 @@ function openAdd(){
   $("#close").onclick = closeSheet;
   $("#addForm").onsubmit = async e => { e.preventDefault();
     const lic = $("#a-lic").value.trim().toUpperCase(), id = docId(lic);
-    if (!db){ $("#addMsg").textContent = "Saving is unavailable in this view."; return; }
+    if (!db){ $("#addMsg").textContent = "Not connected. Reload the page."; return; }
     if (clients.some(c => c.id === id)){ $("#addMsg").textContent = "That license is already on the list."; return; }
     try { await db.doc("clients/" + id).set({name:$("#a-name").value.trim().toUpperCase(), license:lic, ubi:$("#a-ubi").value.replace(/\D/g,""),
       contact:{name:$("#a-ct").value.trim(), phone:$("#a-ph").value.trim(), email:""}, followup:{status:"",date:""}, policies:[], notes:[], added_at:new Date().toISOString()});
@@ -843,7 +896,22 @@ function openAdd(){
 $("#desk").addEventListener("click", e => { const r = e.target.closest(".row"); if (r) openClient(r.dataset.id); });
 $("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") closeSheet(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
-$("#q").addEventListener("input", render);
+// Typing in search waits for a short pause before redrawing.
+let qTimer = null;
+$("#q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(render, 200); });
+// Several collections often change at once (a routine run): collect the redraws and do each one once, on the next frame.
+const queued = new Set();
+let frame = 0;
+function redraw(...fns){
+  dataVer++;
+  fns.forEach(f => queued.add(f));
+  if (!frame) frame = requestAnimationFrame(() => {
+    frame = 0;
+    const fs = queued.has(render) ? [render, ...[...queued].filter(f => ![render, renderToday, renderTodo, renderRen].includes(f))] : [...queued];
+    queued.clear();
+    fs.forEach(f => f());
+  });
+}
 $("#addBtn").onclick = openAdd;
 $("#agencyBtn").onclick = openAgency;
 document.querySelectorAll(".tile").forEach(t => t.onclick = () => { filter = filter === +t.dataset.f ? null : +t.dataset.f; showTab("desk"); render(); });
@@ -873,18 +941,17 @@ render(); renderInbox();
   Promise.resolve(window.claude?.use?.("downloads")).then(x => { dl = x ?? null; }).catch(() => {});
   db = await window.claude?.use?.("db") ?? null;
   window.sosInit?.(db);
-  if (!db){ $("#desk").innerHTML = $("#today").innerHTML = `<div class="empty">Open this page in Claude while signed in to see your clients.</div>`; return; }
+  if (!db){ $("#desk").innerHTML = $("#today").innerHTML = `<div class="empty">Couldn't connect to your database. Reload the page.</div>`; return; }
   db.collection("clients").onSnapshot(s => {
     clients = s.docs.map(d => ({id: d.id, ...d.data()}));
-    render();
-    if (openId && !document.activeElement?.closest?.("#panel form")) openClient(openId);
+    redraw(render, refreshSheet);
   }, () => {});
   Promise.resolve(window.claude?.use?.("assets")).then(x => { assets = x ?? null; }).catch(() => {});
   db.doc("meta/agency").onSnapshot(s => { agency = s.exists ? s.data() : {}; }, () => {});
-  db.doc("meta/status").onSnapshot(s => { meta = s.exists ? s.data() : {}; render(); renderInbox(); }, () => {});
-  db.collection("todo").onSnapshot(s => { todos = s.docs.map(d => ({id: d.id, ...d.data()})); renderTodo(); renderToday(); }, () => {});
-  db.collection("renewals").onSnapshot(s => { renDocs = s.docs.map(d => ({id: d.id, ...d.data()})); renderRen(); renderToday(); }, () => {});
-  db.collection("outbox").onSnapshot(s => { outboxItems = s.docs.map(d => ({id: d.id, ...d.data()})); renderRen(); renderToday(); }, () => {});
+  db.doc("meta/status").onSnapshot(s => { meta = s.exists ? s.data() : {}; redraw(render, renderInbox); }, () => {});
+  db.collection("todo").onSnapshot(s => { todos = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(renderTodo, renderToday); }, () => {});
+  db.collection("renewals").onSnapshot(s => { renDocs = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(renderRen, renderToday); }, () => {});
+  db.collection("outbox").onSnapshot(s => { outboxItems = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(renderRen, renderToday); }, () => {});
 })();
 </script>
 <script>
