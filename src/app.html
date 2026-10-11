@@ -160,7 +160,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 // One meaning of urgent everywhere: "Action now" is lapsed or ending within 14 days (the same window Today uses), "Due" is within 60.
 const WARN = 60, URGENT = 14;
-let assets = null, agency = {}, dl = null, db = null, clients = [], meta = {}, filter = null, openId = null, canWrite = true, todos = [];
+let assets = null, agency = {}, dl = null, db = null, clients = [], meta = {}, filter = null, openId = null, canWrite = true, todos = [], mails = [];
 const DEAD = new Set(["Canceled","Cancelled","Expired"]);
 
 function today(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
@@ -222,8 +222,8 @@ function render(){
   document.querySelectorAll(".tile").forEach(t => t.setAttribute("aria-pressed", String(filter === +t.dataset.f)));
   const ck = meta.checked_at ? new Date(meta.checked_at) : null;
   $("#checked").textContent = ck ? `L&I checked ${ck.toLocaleString("en-US",{weekday:"short",hour:"numeric",minute:"2-digit"})}` : "Waiting for the first L&I check";
-  const inboxItems = meta.inbox || [];
-  $("#inboxN").textContent = inboxItems.length ? `(${inboxItems.length})` : "";
+  const inboxN = inboxList().length;
+  $("#inboxN").textContent = inboxN ? `(${inboxN})` : "";
 
   let vis = rows.filter(r => (filter == null || r.a.lvl === filter) &&
     (!q || [r.c.name, r.c.license, r.c.ubi, r.c.contact?.name].some(v => String(v||"").toLowerCase().includes(q))));
@@ -551,7 +551,7 @@ function renderToday(){
   $("#todayN").textContent = n ? `(${n})` : "";
   const TOP = 6, cnt = s => (String($(s)?.textContent || "").match(/\d+/) || [""])[0];
   const more = (k, label, list) => list.length > TOP ? `<div class="jump"><button class="btn" data-go="${k}">See all ${list.length} in ${label}</button></div>` : "";
-  const outN = outboxItems.filter(o => ["pending", "failed"].includes(o.status)).length, taskN = cnt("#tasksN"), inN = (meta.inbox || []).length;
+  const outN = outboxItems.filter(o => ["pending", "failed"].includes(o.status)).length, taskN = cnt("#tasksN"), inN = inboxList().length;
   $("#today").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
     `<p class="notice" style="margin:12px 0 0">The most urgent few from each tab. Tap a button to see the whole list.</p>` +
     (licTop.length ? `${secH(`L&amp;I licenses: lapsed in the last ${TODAY_WINDOW} days or ending within ${TODAY_SOON}`, licTop.length)}<div class="list">${licTop.slice(0, TOP).map(callCard).join("")}</div>${more("todo", "L&amp;I licenses", licTop)}` : "") +
@@ -566,8 +566,12 @@ function renderToday(){
 async function onCalled(b){
   const c = clients.find(x => x.id === b.dataset.id); if (!c) return;
   const d = new Date(); d.setDate(d.getDate() + 3);
-  const followup = b.dataset.called === "1" ? {status: "Contacted", date: localYmd(d)} : {...(c.followup || {}), date: ""};
-  b.disabled = true; if (!(await save(c, {followup}))) { b.disabled = false; b.textContent = "Could not save"; }
+  // Keeps whatever status was set (Quote sent, Waiting on payment...) and logs the call in the client's history.
+  const called = b.dataset.called === "1";
+  const followup = called ? {...(c.followup || {}), status: c.followup?.status || "Contacted", date: localYmd(d)} : {...(c.followup || {}), date: ""};
+  b.disabled = true;
+  const ok = called ? await saveNotes(c, {followup}, {kind: "call", text: `Called. Check back ${fd(localYmd(d))}.`}) : await save(c, {followup});
+  if (!ok) { b.disabled = false; b.textContent = "Could not save"; }
 }
 $("#today").addEventListener("click", async e => {
   const g = e.target.closest("[data-go]"); if (g){ $("#tab-" + g.dataset.go)?.click(); window.scrollTo(0, 0); return; }
@@ -576,15 +580,34 @@ $("#today").addEventListener("click", async e => {
   const o = e.target.closest("[data-open]"); if (o) openClient(o.dataset.open);
 });
 
-function renderInbox(){
-  const items = meta.inbox || [];
-  $("#inbox").innerHTML = items.length
-    ? `<div class="section-h"><h2>Renewal emails since last check</h2></div><div class="list">${items.map(m => `<div class="mail">
-        <span class="notice">${esc(fd(m.date))} · ${esc(m.from || "")}${m.client ? " · " + esc(m.client) : ""}</span>
-        <span class="s">${esc(m.subject)}</span><span>${esc(m.summary || "")}</span>
-        ${m.link ? `<a href="${esc(m.link)}" target="_blank" rel="noopener">Open in Gmail</a>` : ""}</div>`).join("")}</div>`
-    : `<div class="empty">Bond, insurance and L&amp;I emails from your inboxes show up here after each check.</div>`;
+// Inbox: every insurance and L&I email the checks find, kept until you dismiss it (the check itself only reports what's new since the last run).
+// Saved copies live in `mail/<id>`, written by tools/carrier_tasks.py after each check; meta.inbox fills in anything not saved yet.
+function mailId(m){
+  const g = String(m.link || "").match(/#[a-z]+\/([0-9a-f]{10,})/i);
+  return g ? "g" + g[1].toLowerCase() : ("s-" + `${m.date || ""}-${m.subject || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "-")).slice(0, 80);
 }
+function inboxList(){
+  const byId = new Map(mails.map(m => [m.id, m]));
+  for (const m of meta.inbox || []){ const id = mailId(m); if (!byId.has(id)) byId.set(id, {...m, id}); }
+  return [...byId.values()].filter(m => m.status !== "dismissed").sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+function renderInbox(){
+  const items = inboxList();
+  $("#inbox").innerHTML = items.length
+    ? `<div class="section-h"><h2>Insurance and L&amp;I emails</h2><span class="notice">Stay here until you dismiss them</span></div><div class="list">${items.map(m => `<div class="mail" data-mail="${esc(m.id)}">
+        <span class="notice">${esc(fd(m.date))} · ${esc(m.from || "")}${m.client ? " · " + esc(m.client) : ""}${m.action ? ` <span class="chip red">${esc(m.action)}</span>` : ""}</span>
+        <span class="s">${esc(m.subject)}</span><span>${esc(m.summary || "")}</span>
+        <span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">${m.link ? `<a href="${esc(m.link)}" target="_blank" rel="noopener">Open in Gmail</a>` : ""}<button class="btn ghost" type="button" data-dismiss style="font-size:12.5px">Dismiss</button></span></div>`).join("")}</div>`
+    : `<div class="empty">Bond, insurance and L&amp;I emails from your inboxes show up here after each check, and stay until you dismiss them.</div>`;
+}
+$("#inbox").addEventListener("click", async e => {
+  const b = e.target.closest("[data-dismiss]"); if (!b || !db) return;
+  const id = b.closest("[data-mail]").dataset.mail, m = inboxList().find(x => x.id === id); if (!m) return;
+  b.disabled = true;
+  const {id: _id, ...saved} = m;
+  try { await db.doc("mail/" + id).update({...saved, status: "dismissed", dismissed_at: new Date().toISOString()}); }
+  catch { b.disabled = false; b.textContent = "Could not save"; }
+});
 
 function lniBox(label, x, kind, a){
   const hit = a.items.find(i => i.kind === kind);
@@ -624,6 +647,7 @@ function openClient(id){
       ${a.coi === "other" ? `<span class="notice">None of these COIs match the liability policy L&amp;I shows now (${esc(l.insurance?.number || "")}). Request a current one from the carrier.</span>` : ""}
       <span class="notice" id="dlMsg"></span>
     </section>
+    <section class="card" id="clientDocs" hidden></section>
     <section class="card"><h3>Follow-up</h3>
       <form class="form" id="fuForm">
         <label>Status<select id="fu-status">${["","Need to contact","Contacted","Quote sent","Waiting on payment","Renewed","Filed with L&I"].map(s=>`<option ${c.followup?.status===s?"selected":""}>${s}</option>`).join("")}</select></label>
@@ -648,14 +672,16 @@ function openClient(id){
         <div class="actions full"><span class="notice" id="polMsg"></span><button class="btn" type="button" id="polCancel">Cancel</button><button class="btn primary" type="submit" id="polSubmit">Add policy</button></div>
       </form>
     </section>
-    <section class="card"><h3>Notes</h3>
+    <section class="card"><h3>Notes and history</h3>
       <form class="form" id="noteForm"><label class="full"><span class="notice">Add a note</span><textarea id="note-text" rows="2" placeholder="Called owner, renewal payment promised Friday"></textarea></label>
         <div class="actions full"><span class="notice" id="noteMsg"></span><button class="btn primary" type="submit">Add note</button></div></form>
-      <div style="display:grid;gap:8px">${(c.notes||[]).slice().reverse().map(n=>`<div class="note"><time>${new Date(n.at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</time>${esc(n.text)}</div>`).join("")}</div>
+      <div style="display:grid;gap:8px" id="clientHistory">${(c.notes||[]).slice().reverse().map(n=>`<div class="note"><time>${new Date(n.at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</time>${esc(n.text)}</div>`).join("")}</div>
     </section>
     <div class="actions"><button class="btn ghost" id="delClient" style="color:var(--red)">Remove client</button></div>`;
   $("#sheet").hidden = false;
   wireSheet(c);
+  // History, documents and other add-ons (src/timeline.js, src/clientdocs.js) fill in their parts of the sheet.
+  document.dispatchEvent(new CustomEvent("rd:client", {detail: c}));
 }
 
 async function proofPdf(c){
@@ -810,6 +836,14 @@ async function saveList(c, key, change, msgEl){
   catch { if (msgEl) msgEl.textContent = "Could not save. Check your connection and try again."; return false; }
   return save(c, {[key]: change(cur.slice())}, msgEl);
 }
+// Save a change and add one entry to the client's notes (their history) in the same write.
+async function saveNotes(c, patch, entry, msgEl){
+  if (!db){ if (msgEl) msgEl.textContent = "Not connected. Reload the page."; return false; }
+  let cur;
+  try { const snap = await db.doc("clients/" + c.id).get(); cur = (snap.exists && snap.data().notes) || []; }
+  catch { if (msgEl) msgEl.textContent = "Could not save. Check your connection and try again."; return false; }
+  return save(c, {...patch, notes: [...cur, {at: new Date().toISOString(), ...entry}]}, msgEl);
+}
 // A policy's id: its own, or (for ones saved before ids existed) what it says, which is the same on every device.
 const polId = p => p.id || ["type", "carrier", "number", "effective", "expiration"].map(k => p[k] || "").join("|");
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/-/g, "").slice(0, 12);
@@ -831,8 +865,11 @@ function wireSheet(c){
   $("#proofBtn").onclick = () => proofPdf(c);
   $("#newCoi").onclick = () => coiForm(c);
   $("#fuForm").onsubmit = async e => { e.preventDefault();
-    await save(c, {followup:{status:$("#fu-status").value, date:$("#fu-date").value},
-      contact:{name:$("#ct-name").value.trim(), phone:$("#ct-phone").value.trim(), email:$("#ct-email").value.trim()}}, $("#fuMsg")); };
+    const status = $("#fu-status").value, patch = {followup:{status, date:$("#fu-date").value},
+      contact:{name:$("#ct-name").value.trim(), phone:$("#ct-phone").value.trim(), email:$("#ct-email").value.trim()}};
+    // A changed status goes into the client's history too, so "Quote sent" isn't lost when it later becomes "Renewed".
+    if (status !== (c.followup?.status || "")) await saveNotes(c, patch, {kind: "status", text: status ? `Status: ${status}` : "Status cleared"}, $("#fuMsg"));
+    else await save(c, patch, $("#fuMsg")); };
   const polForm = $("#polForm"), F = {type: "p-type", carrier: "p-carrier", number: "p-number", effective: "p-eff", expiration: "p-exp", premium: "p-prem", notes: "p-notes"};
   const openPolForm = p => {
     polForm.dataset.edit = p ? polId(p) : "";
@@ -951,6 +988,7 @@ render(); renderInbox();
   db.doc("meta/status").onSnapshot(s => { meta = s.exists ? s.data() : {}; redraw(render, renderInbox); }, () => {});
   db.collection("todo").onSnapshot(s => { todos = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(renderTodo, renderToday); }, () => {});
   db.collection("renewals").onSnapshot(s => { renDocs = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(renderRen, renderToday); }, () => {});
+  db.collection("mail").onSnapshot(s => { mails = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(render, renderInbox); }, () => {});
   db.collection("outbox").onSnapshot(s => { outboxItems = s.docs.map(d => ({id: d.id, ...d.data()})); redraw(renderRen, renderToday); }, () => {});
 })();
 </script>
