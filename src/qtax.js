@@ -9,6 +9,7 @@
 //                      approved_at, sent_at, error}; status: "draft" -> "approved" (his tap) -> "sending" -> "sent" | "failed" | "skipped" | "dismissed"
 //   qtaxmeta/settings {ask_template, followup_template}   ({name} = first name, {quarter} = quarter in Ukrainian)
 //   qtaxmeta/mac      heartbeat from the Mac: {seen_at, version, can_read, error, quiet}
+//   qtaxmeta/responders per phone (last 10 digits): {sent, replied, last_in}, counted by the Mac on request
 //   qtaxmeta/discovery group texts the Mac found in his Messages: {scanned_at, requested_at, blasts: [{text, at, recipients: [{phone, name}]}]}
 (() => {
   const q = s => document.querySelector(s);
@@ -40,7 +41,7 @@
   const STATUS = [["", "Not asked"], ["asked", "Asked"], ["received", "Got income"], ["filed", "Filed"], ["paid", "Paid"]];
   const OPEN = ["draft", "approved", "sending"];
 
-  let db = null, clients = [], texts = [], settings = {}, mac = null, discovery = null;
+  let db = null, clients = [], texts = [], settings = {}, mac = null, discovery = null, responders = null;
   let quarter = filingQuarter(), filter = null, editing = null, adding = false;
 
   // ---- Mode switch: a "Qtax" button next to Policies / SOS status ----
@@ -120,6 +121,7 @@
   </header>
   ${adding ? addForm() : ""}
   ${discoveryCard()}
+  ${silentCard(active)}
   ${draftCards(active)}
   ${progressCard()}
   <div class="section-h"><h2>Client list · ${qLabel(quarter)}</h2><span class="notice">${active.length} get the quarter text${clients.length > active.length ? ` · ${clients.length - active.length} removed` : ""}</span></div>
@@ -154,6 +156,20 @@
         <span><button class="btn primary" data-qblast="${i}" type="button">Add these people</button></span></h3>
         <div class="qmsg">${h(b.text)}</div>
         <span class="notice">${b.fresh.length} new: ${h(b.fresh.slice(0, 12).map(r => r.name || phoneFmt(r.phone)).join(", "))}${b.fresh.length > 12 ? "…" : ""}. "Add these people" puts them on your client list and keeps your wording. Each person still gets their own separate text.</span></section>`).join("")}</div>`;
+  }
+
+  // People who got the past quarter texts and never wrote back within 3 weeks (counted on the Mac, qtaxmeta/responders).
+  const silentOf = c => { const p = responders?.people?.[digits(c.phone).slice(-10)]; return p && p.sent >= 2 && !p.replied ? p : null; };
+  function silentCard(active){
+    if (responders?.requested_at && !(responders.scanned_at > responders.requested_at)) return `<div class="empty">Your Mac is checking who answered your past quarter texts…</div>`;
+    const list = active.filter(silentOf);
+    if (!list.length) return "";
+    return `<section class="card"><h3><span>Never answer your quarter texts <span class="chip amber">${list.length}</span></span>
+        <span><button class="btn" data-qremovesilent type="button">Remove all ${list.length}</button></span></h3>
+      <span class="notice">They got your last ${responders.blasts} quarter texts at least twice and never texted back. Remove the ones who aren't your clients anymore.</span>
+      <div class="list">${list.map(c => { const p = silentOf(c); return `<div class="qrow" data-qc="${h(c.id)}"><div><span class="name">${h(c.name || phoneFmt(c.phone))}</span>
+        <div class="meta">${h(phoneFmt(c.phone))} · no reply to ${p.sent} texts · ${p.last_in ? `last texted you ${day(p.last_in)} ${new Date(p.last_in).getFullYear()}` : "never texted you"}</div></div>
+        <div class="acts"><button class="btn ghost" data-qremove type="button">Remove</button></div></div>`; }).join("")}</div></section>`;
   }
 
   function draftCards(active){
@@ -246,6 +262,13 @@
         await inChunks(texts.filter(x => x.status === "draft" && x.kind === kind), x => db.doc("texts/" + x.id).update({body: fill(val, clients.find(c => c.id === x.client_id) || x, x.quarter || quarter)}));
         document.activeElement?.blur(); return render();
       }
+      if (t.closest("[data-qremovesilent]")){
+        const list = clients.filter(c => c.active !== false && silentOf(c));
+        if (!confirm(`Remove ${list.length} people who never answered from your Qtax list? You can add any of them back later.`)) return;
+        t.disabled = true;
+        await inChunks(texts.filter(x => x.status === "draft" && list.some(c => c.id === x.client_id)), x => db.doc("texts/" + x.id).update({status: "dismissed", dismissed_at: new Date().toISOString()}));
+        return inChunks(list, c => db.doc("qtax/" + c.id).update({active: false, removed_reason: "never answered"}));
+      }
       const drop = t.closest("[data-qdrop]"); if (drop) return db.doc("texts/" + drop.dataset.qdrop).update({status: "dismissed", dismissed_at: new Date().toISOString()});
       const discard = t.closest("[data-qdiscard]"); if (discard){
         const list = texts.filter(x => x.status === "draft" && x.kind === discard.dataset.qdiscard);
@@ -329,7 +352,7 @@
     db.collection("texts").onSnapshot(s => { texts = s.docs.map(d => ({id: d.id, ...d.data()})); render(); }, () => {});
     db.collection("qtaxmeta").onSnapshot(s => {
       const m = Object.fromEntries(s.docs.map(d => [d.id, d.data()]));
-      settings = m.settings || {}; mac = m.mac || null; discovery = m.discovery || null; render();
+      settings = m.settings || {}; mac = m.mac || null; discovery = m.discovery || null; responders = m.responders || null; render();
     }, () => {});
     // Ask the Mac to look for last quarter's group text the first time there are no clients.
     setTimeout(async () => { if (!clients.length && !discovery) await db.doc("qtaxmeta/discovery").update({requested_at: new Date().toISOString()}).catch(() => {}); }, 4000);
