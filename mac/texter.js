@@ -26,16 +26,31 @@ const APPLE_EPOCH_MS = 978307200000;
 const MS = "(m.date/1000000 + " + APPLE_EPOCH_MS + ")"; // chat.db dates are nanoseconds since 2001-01-01
 
 // Sends one text. Prefers the existing conversation (same thread, same iMessage/SMS as always), else the right account.
+// Sends one text to ONE person. Group chats are impossible here, checked three times over:
+// the target must be a single phone number, a chat is used only if it has exactly one participant whose number matches,
+// and otherwise the text goes to that single participant directly (a one-on-one conversation by definition).
 const SEND_SCRIPT = `on run argv
   set theText to item 1 of argv
   set theTarget to item 2 of argv
   set theService to item 3 of argv
   set theChat to item 4 of argv
+  set theDigits to item 5 of argv
+  if theTarget does not start with "+" or (length of theTarget) < 11 or (length of theTarget) > 16 then error "Refused: not a single phone number"
+  repeat with ch in characters 2 thru -1 of theTarget
+    if "0123456789" does not contain (contents of ch) then error "Refused: not a single phone number"
+  end repeat
   tell application "Messages"
-    if theChat is not "" then
+    if theChat is not "" and theChat contains ";-;" and theChat ends with theDigits then
       try
-        send theText to chat id theChat
-        return "chat"
+        set c to chat id theChat
+        set ps to participants of c
+        if (count of ps) is 1 then
+          set h to handle of item 1 of ps
+          if h ends with theDigits then
+            send theText to c
+            return "chat"
+          end if
+        end if
       end try
     end if
     if theService is "SMS" or theService is "RCS" then
@@ -56,6 +71,13 @@ const sh = cmd => me.doShellScript(cmd, {alteringLineEndings: false});
 const nowIso = () => new Date().toISOString();
 const digits = s => String(s || "").replace(/\D/g, "");
 const last10 = s => digits(s).slice(-10);
+// Exactly one US phone number as +1XXXXXXXXXX, or null. Anything with a comma, a second number or letters is refused.
+function oneNumber(p){
+  const raw = String(p || "").trim();
+  if (!raw || /[,;&\n]|[A-Za-z@]/.test(raw)) return null;
+  const d = digits(raw);
+  return d.length === 10 ? "+1" + d : d.length === 11 && d[0] === "1" ? "+" + d : null;
+}
 function readFile(p){ const s = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null); return s.isNil() ? null : s.js; }
 function writeFile(p, text){ $(String(text)).writeToFileAtomicallyEncodingError(p, true, $.NSUTF8StringEncoding, null); }
 function readJson(p, d){ try { return JSON.parse(readFile(p) || "") || d; } catch (e){ return d; } }
@@ -156,7 +178,8 @@ function lastChat(phone){
   const d = last10(phone); if (d.length < 10) return {};
   const rows = chat(`SELECT c.guid AS guid, c.service_name AS svc FROM chat c
     JOIN chat_handle_join j ON j.chat_id = c.ROWID JOIN handle h ON h.ROWID = j.handle_id
-    WHERE c.style = 45 AND h.id LIKE '%${d}'
+    WHERE c.style = 45 AND c.guid LIKE '%;-;%' AND h.id LIKE '%${d}'
+      AND (SELECT COUNT(*) FROM chat_handle_join j2 WHERE j2.chat_id = c.ROWID) = 1
     ORDER BY (SELECT MAX(m.date) FROM chat_message_join cm JOIN message m ON m.ROWID = cm.message_id WHERE cm.chat_id = c.ROWID) DESC LIMIT 1`);
   return rows[0] || {};
 }
@@ -224,8 +247,11 @@ function sendApproved(readable){
     if (last10(phone).length < 10){ done({status: "failed", error: "No phone number"}); continue; }
     const startMs = Date.now();
     try {
-      const conv = readable ? lastChat(phone) : {};
-      const via = sh(`/usr/bin/osascript ${sq(SEND)} ${sq(t.body)} ${sq(phone)} ${sq(conv.svc || "iMessage")} ${sq(conv.guid || "")}`).trim();
+      const one = oneNumber(phone);
+      if (!one) throw new Error("Refused: not a single phone number");
+      const conv = readable ? lastChat(one) : {};
+      const guid = /^[A-Za-z]+;-;\+?\d+$/.test(conv.guid || "") && conv.guid.endsWith(last10(one)) ? conv.guid : "";
+      const via = sh(`/usr/bin/osascript ${sq(SEND)} ${sq(t.body)} ${sq(one)} ${sq(conv.svc || "iMessage")} ${sq(guid)} ${sq(last10(one))}`).trim();
       delay(GAP_S);
       // Did Messages accept it? (error <> 0 means it shows "Not Delivered" on the Mac)
       if (readable){
