@@ -2,50 +2,52 @@
    Kept out of src/app.html, which the L&I routine overwrites; build.mjs links it at the end of <body>
    so it also wins over the styles outbox.js, qtax.js and tasks.js add to <head> at runtime. */
 @media (max-width:600px){
-  body{padding-inline:max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 24px);-webkit-text-size-adjust:100%}
+  body{padding-inline:max(12px, env(safe-area-inset-left, 0px)) max(12px, env(safe-area-inset-right, 0px));padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 24px);-webkit-text-size-adjust:100%;font-size:14px}
 
   /* The header (title, tiles, tabs, search) is a third of the screen: let it scroll away instead of staying pinned. */
   header.top{position:static;padding-block:10px 6px;gap:8px}
   .brand{gap:2px 12px}
-  .brand h1{font-size:20px}
+  .brand h1{font-size:18px}
 
   /* Mode switch and tabs: every tab visible and big enough to tap; tabs wrap to a second row instead of hiding off the edge. */
   .modes{padding-top:calc(env(safe-area-inset-top, 0px) + 8px)}
   .modes .tabs{max-width:none}
-  .modes .tabs button{min-height:40px;font-size:14px;white-space:nowrap;padding-inline:8px}
+  .modes .tabs button{min-height:36px;font-size:13.5px;white-space:nowrap;padding-inline:8px}
   .bar .tabs{flex:1 1 100%;flex-wrap:wrap;overflow:visible;border-radius:14px;max-width:none}
-  .bar .tabs button{flex:1 1 auto;min-height:40px;padding:6px 10px;border-radius:11px;white-space:nowrap}
+  .bar .tabs button{flex:1 1 auto;min-height:36px;padding:5px 9px;font-size:13px;border-radius:11px;white-space:nowrap}
 
   /* Search gets its own full row; the buttons beside it share the next one. */
-  .bar .search{flex:1 1 100%;min-height:42px}
-  .bar > .btn{flex:1 1 0;min-height:42px}
+  .bar .search{flex:1 1 100%;min-height:38px;padding-block:6px}
+  .bar > .btn{flex:1 1 0;min-height:38px}
 
   /* Tiles: tighter so the list starts higher. */
   .tiles{gap:6px}
-  .tile{padding:7px 9px}
-  .tile b{font-size:21px}
-  .tile span{font-size:10.5px;letter-spacing:.04em;line-height:1.25}
+  .tile{padding:5px 8px}
+  .tile b{font-size:18px}
+  .tile span{font-size:10px;letter-spacing:.04em;line-height:1.25}
 
   /* iPhone zooms the page into any field under 16px; 16px stops that. */
   input,select,textarea,select.btn,.search,.form input,.form select,.form textarea,.qrow select{font-size:16px}
 
   /* Tap targets. */
-  .btn{min-height:40px;padding:8px 12px}
-  .btn.ghost{min-height:36px}
-  .qrow select{min-height:40px}
-  .step{min-height:38px;padding:7px 12px;font-size:14px}
+  .btn{min-height:36px;padding:6px 11px;font-size:13px}
+  .btn.ghost{min-height:32px}
+  .qrow select{min-height:34px;padding-block:3px}
+  .step{min-height:34px;padding:5px 10px;font-size:13px}
   #rd-out{padding:12px 16px}
 
   /* Section headings: long uppercase labels read better with less tracking. */
-  .section-h{margin-top:14px;flex-wrap:wrap;gap:2px 8px}
+  .section-h{margin-top:12px}
+  .section-h h2{flex:1 1 0;min-width:0}
   .section-h h2{letter-spacing:.04em;font-size:12.5px}
 
   /* Client sheet: Close stays reachable while scrolling; L&I boxes stack instead of squeezing into two narrow columns. */
   .panel{padding-inline:12px;gap:12px}
   .panel-h{position:sticky;top:calc(-1 * (env(safe-area-inset-top, 0px) + 14px));z-index:2;background:var(--bg);margin:calc(-1 * (env(safe-area-inset-top, 0px) + 14px)) -12px 0;padding:calc(env(safe-area-inset-top, 0px) + 12px) 12px 10px;border-bottom:1px solid var(--line)}
-  .panel-h h2{font-size:19px;overflow-wrap:anywhere}
-  .lni{grid-template-columns:1fr}
-  .card{padding:12px 11px}
+  .panel-h h2{font-size:18px;overflow-wrap:anywhere}
+  .lni{grid-template-columns:1fr;gap:6px}
+  .lni .box{padding:5px 9px;gap:0;font-size:12.5px}
+  .card{padding:9px 10px;gap:6px}
 
   /* Certificate rows: buttons drop under the text and line up in a row. */
   .pol:has(> span[style*="text-align:right"]){grid-template-columns:1fr}
@@ -55,8 +57,25 @@
   /* Action rows wrap cleanly and buttons are easy to hit. */
   .actions{gap:8px}
   .actions .btn{flex:0 1 auto}
-  .call{gap:4px 10px}
-  .call .left{min-width:56px;padding:6px}
+  .list{gap:6px}
+
+  /* Client cards: compact so more fit on a screen. The days box shrinks and the buttons sit under the name, not on their own full-width row. */
+  .call{gap:3px 10px}
+  .call .left{min-width:46px;padding:4px 5px;border-radius:7px}
+  .call .left b{font-size:17px}
+  .call .left span{font-size:9.5px;letter-spacing:.03em;line-height:1.15}
+  .call .body{gap:2px}
+  .call .name,.card .btn.ghost.name{font-size:14.5px !important;min-height:0}
+  .call .actions{grid-column:2;justify-content:flex-start}
+  .call .actions .btn{min-height:32px;padding:4px 10px}
+  .chip{font-size:11.5px;padding:0 6px}
+  .why{gap:3px 5px}
+  .notice{font-size:12px}
+  .row .main{padding:7px 0;gap:2px}
+  .row{gap:10px}
+  .qrow{padding:7px 10px;gap:4px 10px}
+  .qrow .btn.name{font-size:14.5px}
+  .section-h h2{font-size:12px}
 
   /* Qtax: long client names stay left-aligned when they wrap; the × on each name in a waiting text is easy to hit. */
   .qrow .btn.name{text-align:left}
