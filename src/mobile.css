@@ -16,15 +16,15 @@
   .bar .tabs{flex:1 1 100%;flex-wrap:wrap;overflow:visible;border-radius:14px;max-width:none}
   .bar .tabs button{flex:1 1 auto;min-height:36px;padding:5px 9px;font-size:13px;border-radius:11px;white-space:nowrap}
 
-  /* Search gets its own full row; the buttons beside it share the next one. */
-  .bar .search{flex:1 1 100%;min-height:38px;padding-block:6px}
-  .bar > .btn{flex:1 1 0;min-height:38px}
+  /* Search and its buttons share one row. */
+  .bar .search{flex:1 1 120px;min-height:38px;padding-block:6px}
+  .bar > .btn{flex:0 0 auto;min-height:38px;padding-inline:10px}
 
   /* Tiles: tighter so the list starts higher. */
   .tiles{gap:6px}
   .tile{padding:5px 8px}
   .tile b{font-size:18px}
-  .tile span{font-size:10px;letter-spacing:.04em;line-height:1.25}
+  .tile span{font-size:10px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25}
 
   /* iPhone zooms the page into any field under 16px; 16px stops that. */
   input,select,textarea,select.btn,.search,.form input,.form select,.form textarea,.qrow select{font-size:16px}
@@ -73,7 +73,9 @@
   .notice{font-size:12px}
   .row .main{padding:7px 0;gap:2px}
   .row{gap:10px}
-  .qrow{padding:7px 10px;gap:4px 10px}
+  .qrow{padding:7px 10px;gap:4px 10px;grid-template-columns:minmax(0,1fr) auto}
+  .qrow .acts{flex-direction:column-reverse;align-items:flex-end;justify-content:center;gap:0}
+  .qrow .acts .btn.ghost{min-height:28px;padding-block:2px}
   .qrow .btn.name{font-size:14.5px}
   .section-h h2{font-size:12px}
 
@@ -85,4 +87,11 @@
 
   .form{grid-template-columns:repeat(auto-fit, minmax(130px, 1fr))}
   .foot{margin-top:18px}
+}
+
+/* Small phones (iPhone SE and similar): labels wrap again instead of being cut off, and search gets its own row. */
+@media (max-width:360px){
+  .tile span{white-space:normal;overflow:visible}
+  .bar .search{flex-basis:100%}
+  .bar > .btn{flex:1 1 0}
 }
