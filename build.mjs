@@ -27,13 +27,14 @@ const boot = `<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.
 // The artifact source starts with <title>, styles and markup; everything before the first <script> is head + body markup.
 const pre = app.slice(0, at), rest = app.slice(at);
 const split = pre.indexOf("</style>") + "</style>".length;
-// The Outbox (src/outbox.js) loads after the app's scripts; it lives outside app.html because the L&I routine overwrites that file.
-const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n</body></html>\n';
+// The Outbox (src/outbox.js) and Qtax mode (src/qtax.js) load after the app's scripts; they live outside app.html because the L&I routine overwrites that file.
+const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n</body></html>\n';
 
 mkdirSync("dist", {recursive: true});
 cpSync("public", "dist", {recursive: true});
 cpSync("src/shim.js", "dist/shim.js");
 cpSync("src/outbox.js", "dist/outbox.js");
+cpSync("src/qtax.js", "dist/qtax.js");
 writeFileSync("dist/index.html", html);
 console.log("built dist/index.html", html.length, "bytes");
 

@@ -35,3 +35,14 @@ Routine changes at switch-over (artifact db -> Supabase):
 
 ## One-time migration
 `tools/migrate.py EXPORT_DIR COIS_DIR` (EXPORT_DIR from ArtifactData list with out_dir; COIS_DIR = artifact assets saved as `<asset_id>.pdf`).
+
+## Qtax (quarterly-tax texts from Eduard's own number)
+- `src/qtax.js` adds a "Qtax" mode next to Policies and SOS status (loaded by `build.mjs`, like the Outbox). Clients are `qtax/<id>`
+  (`p` + last 10 phone digits) with one `q_2026Q3`-style field per quarter: status asked, received, filed or paid.
+- Texts are `texts/<id>`. The page only writes drafts and, on Eduard's "Approve & send" tap, `status: "approved"`.
+  Nothing else may set "approved": routines and the Mac only write drafts.
+- `mac/texter.js` runs on Eduard's Mac as "Renewal Desk Texter" (install: double-click `mac/Install Renewal Desk Texter.command`).
+  Every minute it sends approved texts through Messages (same thread, same number as always; never 9 pm to 8 am; approvals older
+  than 2 days go back to drafts), reads replies from `~/Library/Messages/chat.db` (needs Full Disk Access) to mark clients
+  "Got income", drafts reminders after 3 days without an answer, finds past group texts (the Hit Em Up blast) for the client list,
+  and writes a heartbeat to `qtaxmeta/mac`. It signs in once as Eduard; nothing secret is in the repo.
