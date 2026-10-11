@@ -53,28 +53,59 @@
 
   // ---- Database ----
   // One live cache per collection, fed by an initial load plus realtime changes, so many listeners share one channel.
+  // Realtime changes are batched: when a routine updates 150 clients at once, the page redraws once, not 150 times.
+  // The whole collection is reloaded when realtime reconnects or the app comes back to the front, so nothing is missed while a phone sleeps.
   const caches = {};
+  const BATCH_MS = 150;
+  function loadError(on){
+    let el = document.getElementById("rd-loaderr");
+    if (!on){ el?.remove(); return; }
+    if (el) return;
+    document.body.insertAdjacentHTML("afterbegin", `<div id="rd-loaderr" role="alert" style="position:sticky;top:0;z-index:90;background:var(--red,#B42318);color:#fff;padding:10px 14px;font-size:14px;text-align:center">
+      Couldn't load your data. Check your internet connection. <button type="button" style="margin-left:8px;border:1px solid #fff;background:none;color:#fff;border-radius:6px;padding:3px 10px">Try again</button></div>`);
+    document.querySelector("#rd-loaderr button").onclick = () => { Object.values(caches).forEach(c => c.reload()); };
+  }
   function cache(col){
     if (caches[col]) return caches[col];
     const c = caches[col] = {docs: new Map(), subs: new Set(), loaded: false};
-    const emit = () => c.subs.forEach(f => f());
+    let timer = null;
+    const emit = () => { clearTimeout(timer); timer = null; c.subs.forEach(f => f()); };
+    const emitSoon = () => { if (!timer) timer = setTimeout(emit, BATCH_MS); };
     c.emit = emit;
-    (async () => {
+    let loading = null;
+    c.reload = () => loading || (loading = (async () => {
       await ready;
-      sb.channel("docs-" + col).on("postgres_changes", {event: "*", schema: "public", table: "docs", filter: `collection=eq.${col}`}, p => {
-        if (p.eventType === "DELETE") c.docs.delete(p.old.id); else c.docs.set(p.new.id, p.new.data);
-        emit();
-      }).subscribe();
+      const docs = new Map();
       for (let from = 0; ; from += 1000){
         const {data, error} = await sb.from("docs").select("id,data").eq("collection", col).range(from, from + 999);
-        if (error){ c.subs.forEach(f => f(error)); return; }
-        data.forEach(r => c.docs.set(r.id, r.data));
+        if (error){ loading = null; loadError(true); c.subs.forEach(f => f(error)); return; }
+        data.forEach(r => docs.set(r.id, r.data));
         if (data.length < 1000) break;
       }
-      c.loaded = true; emit();
+      c.docs = docs; c.loaded = true; loading = null;
+      if (!Object.values(caches).some(x => !x.loaded)) loadError(false);
+      emit();
+    })());
+    (async () => {
+      await ready;
+      let joined = false;
+      sb.channel("docs-" + col).on("postgres_changes", {event: "*", schema: "public", table: "docs", filter: `collection=eq.${col}`}, p => {
+        if (p.eventType === "DELETE") c.docs.delete(p.old.id); else c.docs.set(p.new.id, p.new.data);
+        if (c.loaded) emitSoon();
+      }).subscribe(status => {
+        // After a dropped connection, changes made meanwhile never arrive: reload the collection once it's back.
+        if (status === "SUBSCRIBED"){ if (joined) c.reload(); joined = true; }
+      });
+      c.reload();
     })();
     return c;
   }
+  // Back to the front after a while (phone unlocked, tab switched back): reload everything that's already showing.
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") hiddenAt = Date.now();
+    else if (hiddenAt && Date.now() - hiddenAt > 30000) Object.values(caches).forEach(c => c.loaded && c.reload());
+  });
   const split = path => { const i = path.lastIndexOf("/"); return [path.slice(0, i), path.slice(i + 1)]; };
   const snapDoc = (id, data) => ({id, exists: data !== undefined, data: () => data});
   const local = (col, id, data) => { const c = caches[col]; if (!c) return; if (data === undefined) c.docs.delete(id); else c.docs.set(id, data); c.emit(); };
