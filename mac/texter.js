@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 1;
+const VERSION = 2;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -327,6 +327,33 @@ function discover(){
   log(`discovery: ${blasts.length} group texts`);
 }
 
+// ---------- 5. On request: last week's conversations to a file on Eduard's Desktop (never to the database) ----------
+// Asked for by setting qtaxmeta/export {requested_at, days}. Lets Claude check for messages he never answered.
+const EXPORT_FILE = HOME + "/Desktop/Renewal Desk Texter/recent-texts.json";
+function exportRecent(req){
+  const days = Math.min(Math.max(+req.days || 7, 1), 31), since = Date.now() - days * 864e5;
+  const rows = chat(`SELECT c.ROWID AS cid, c.guid AS guid, c.display_name AS title, c.style AS style, h.id AS handle,
+      m.is_from_me AS me, ${MS} AS ms, m.text AS text, CASE WHEN m.text IS NULL THEN hex(m.attributedBody) END AS body_hex,
+      m.cache_has_attachments AS att, m.associated_message_type AS amt
+    FROM message m JOIN chat_message_join cm ON cm.message_id = m.ROWID JOIN chat c ON c.ROWID = cm.chat_id
+    LEFT JOIN handle h ON h.ROWID = m.handle_id WHERE ${MS} >= ${since} ORDER BY m.ROWID`);
+  const members = {};
+  chat(`SELECT j.chat_id AS cid, h.id AS handle FROM chat_handle_join j JOIN handle h ON h.ROWID = j.handle_id`)
+    .forEach(r => { (members[r.cid] = members[r.cid] || []).push(r.handle); });
+  const names = contacts(), who = hd => names[last10(hd)] || hd || "?";
+  const chats = {};
+  for (const r of rows){
+    const c = chats[r.cid] = chats[r.cid] || {group: r.style === 43, title: r.title || "",
+      people: (members[r.cid] || []).map(hd => ({name: names[last10(hd)] || "", handle: hd})), messages: []};
+    const text = r.amt ? "[reaction]" : (bodyText(r) || (r.att ? "[photo or file]" : ""));
+    c.messages.push({at: new Date(r.ms).toISOString(), from: r.me ? "Eduard" : who(r.handle), text: text.slice(0, 1500)});
+  }
+  const list = Object.keys(chats).map(k => chats[k]).sort((a, b) => b.messages[b.messages.length - 1].at.localeCompare(a.messages[a.messages.length - 1].at));
+  writeFile(EXPORT_FILE, JSON.stringify({made_at: nowIso(), days, chats: list}, null, 1));
+  mergeDoc("qtaxmeta", "export", {done_at: nowIso(), chats: list.length, messages: rows.length});
+  log(`exported ${rows.length} messages in ${list.length} chats`);
+}
+
 // ---------- Main loop ----------
 let lastSignInAsk = 0;
 function tick(){
@@ -344,6 +371,8 @@ function tick(){
     if (readable){
       const d = getDoc("qtaxmeta", "discovery");
       const st = readJson(STATE, {});
+      const ex = getDoc("qtaxmeta", "export");
+      if (ex && ex.requested_at && ex.requested_at > (ex.done_at || "")) exportRecent(ex);
       if (!st.discovered_at || (d && d.requested_at && d.requested_at > (d.scanned_at || ""))){ discover(); writeJson(STATE, Object.assign(readJson(STATE, {}), {discovered_at: nowIso()})); }
     }
   } catch (e){ error = String(e.message || e).slice(0, 200); log("error: " + error); }
