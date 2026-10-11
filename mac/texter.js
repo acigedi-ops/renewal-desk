@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 5;
+const VERSION = 6;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -222,7 +222,41 @@ function scanReplies(clients){
 }
 
 // ---------- 2. Send what Eduard approved ----------
+// Did a text to this number go out since sinceMs? (Messages can time out in AppleScript after it has already sent.)
+function wentOut(phone, sinceMs){
+  try {
+    return chat(`SELECT COUNT(*) AS n FROM message m JOIN handle h ON h.ROWID = m.handle_id
+      WHERE m.is_from_me = 1 AND m.error = 0 AND h.id LIKE '%${last10(phone)}' AND ${MS} >= ${sinceMs - 5000}`)[0].n > 0;
+  } catch (e){ return null; }
+}
+// Record a text as sent, and the client as asked / reminded for that quarter.
+function markSent(t, note){
+  mergeDoc("texts", t.id, {status: "sent", sent_at: nowIso(), error: "", via: t.via || "", note: note || ""});
+  const c = t.client_id && getDoc("qtax", t.client_id); if (!c) return;
+  const k = qKey(t.quarter || filingQuarter()), q = c[k] || {}, nq = Object.assign({}, q), at = nowIso();
+  if (t.kind === "followup"){ nq.followups = (q.followups || 0) + 1; nq.last_followup_at = at; }
+  else { nq.status = q.status || "asked"; nq.asked_at = q.asked_at || at; }
+  mergeDoc("qtax", t.client_id, {[k]: nq});
+}
 function sendApproved(readable){
+  // Sent marks that failed to save last time (network): save them now, never resend.
+  const st0 = readJson(STATE, {}), unmarked = st0.unmarked || [];
+  if (unmarked.length){
+    const left = unmarked.filter(id => {
+      try { const t = getDoc("texts", id); if (t && t.status !== "sent") markSent(Object.assign({id}, t), ""); return false; } catch (e){ return true; }
+    });
+    writeJson(STATE, Object.assign(readJson(STATE, {}), {unmarked: left}));
+  }
+  // A text left in "sending" (the app quit or the Mac slept mid-send) is never retried by itself: it becomes "sent" if
+  // Messages shows it went out, "failed" if Messages shows it didn't, and otherwise "unsure" for Eduard to settle.
+  listDocs("texts", "&data->>status=eq.sending").forEach(t => {
+    const since = Date.parse(t.claimed_at || 0);
+    if (!(Date.now() - since > 10 * 60000)) return;
+    const out = readable ? wentOut(t.phone, since) : null;
+    if (out) markSent(t, "Confirmed from Messages");
+    else mergeDoc("texts", t.id, out === false ? {status: "failed", failed_at: nowIso(), error: "Didn't go out"}
+      : {status: "unsure", unsure_at: nowIso(), error: "Your Mac stopped mid-send. Check Messages: did it go out?"});
+  });
   const approved = listDocs("texts", "&data->>status=eq.approved").sort((a, b) => String(a.approved_at).localeCompare(String(b.approved_at)));
   let sent = 0;
   for (const t of approved){
@@ -246,12 +280,13 @@ function sendApproved(readable){
     const phone = c.phone || t.phone;
     if (last10(phone).length < 10){ done({status: "failed", error: "No phone number"}); continue; }
     const startMs = Date.now();
+    let accepted = false, via = "";
     try {
       const one = oneNumber(phone);
       if (!one) throw new Error("Refused: not a single phone number");
       const conv = readable ? lastChat(one) : {};
       const guid = /^[A-Za-z]+;-;\+?\d+$/.test(conv.guid || "") && conv.guid.endsWith(last10(one)) ? conv.guid : "";
-      const via = sh(`/usr/bin/osascript ${sq(SEND)} ${sq(t.body)} ${sq(one)} ${sq(conv.svc || "iMessage")} ${sq(guid)} ${sq(last10(one))}`).trim();
+      via = sh(`/usr/bin/osascript ${sq(SEND)} ${sq(t.body)} ${sq(one)} ${sq(conv.svc || "iMessage")} ${sq(guid)} ${sq(last10(one))}`).trim();
       delay(GAP_S);
       // Did Messages accept it? (error <> 0 means it shows "Not Delivered" on the Mac)
       if (readable){
@@ -259,16 +294,24 @@ function sendApproved(readable){
           WHERE m.is_from_me = 1 AND h.id LIKE '%${last10(phone)}' AND ${MS} >= ${startMs - 5000} ORDER BY m.ROWID DESC LIMIT 1`)[0];
         if (m && m.err) throw new Error(`Messages couldn't deliver it (error ${m.err})`);
       }
-      const at = nowIso();
-      done({status: "sent", sent_at: at, via, error: ""});
-      const nq = Object.assign({}, q);
-      if (t.kind === "followup"){ nq.followups = (q.followups || 0) + 1; nq.last_followup_at = at; }
-      else { nq.status = q.status || "asked"; nq.asked_at = q.asked_at || at; }
-      mergeDoc("qtax", c.id, {[k]: nq});
-      sent++; log(`sent ${t.kind} to ${c.id} via ${via}`);
+      accepted = true;
     } catch (e){
-      done({status: "failed", error: String(e.message || e).replace(/^.*execution error: /, "").slice(0, 200), failed_at: nowIso()});
-      log(`failed ${t.id}: ${e.message}`);
+      // An error after Messages already sent it (often an AppleScript timeout, -1712) must never become "failed",
+      // or "Send again" would double it. Look in Messages first; if it can't tell, ask Eduard ("unsure").
+      delay(GAP_S);
+      const out = /^Refused|couldn't deliver/.test(e.message || "") ? false : readable ? wentOut(phone, startMs) : null;
+      if (out) accepted = true;
+      else {
+        const msg = String(e.message || e).replace(/^.*execution error: /, "").slice(0, 200);
+        try { done(out === null ? {status: "unsure", unsure_at: nowIso(), error: msg + ". Check Messages: did it go out?"} : {status: "failed", error: msg, failed_at: nowIso()}); } catch (e2){}
+        log(`not sent ${t.id}: ${e.message}`);
+      }
+    }
+    if (accepted){
+      sent++;
+      // Saving "sent" is separate from sending: if it fails (network), remember it locally and retry the mark, never the text.
+      try { markSent(Object.assign({}, t, {via}), ""); log(`sent ${t.kind} to ${c.id} via ${via}`); }
+      catch (e){ writeJson(STATE, Object.assign(readJson(STATE, {}), {unmarked: (readJson(STATE, {}).unmarked || []).concat(t.id)})); log(`sent ${t.id}, mark saved later`); }
     }
   }
 }
@@ -284,7 +327,7 @@ function draftReminders(){
     if (c.active === false || !q || q.status !== "asked" || (q.followups || 0) >= MAX_FOLLOWUPS) continue;
     if ((q.last_followup_at || q.asked_at || "") > cutoff) continue;
     // One reminder at a time; one Eduard dismissed or sent keeps the next away for a few days.
-    if (texts.some(t => t.client_id === c.id && (["draft", "approved", "sending"].includes(t.status) || t.created_at > cutoff))) continue;
+    if (texts.some(t => t.client_id === c.id && (["draft", "approved", "sending", "unsure"].includes(t.status) || t.created_at > cutoff))) continue;
     setDoc("texts", `followup-${k}-${c.id}-${Date.now().toString(36)}`, {client_id: c.id, name: c.name, phone: c.phone, kind: "followup", quarter: k,
       body: fill(settings.followup_template || FOLLOWUP_DEFAULT, c, k), status: "draft", created_at: nowIso(), created_by: "mac"});
     log(`drafted reminder for ${c.id}`);
