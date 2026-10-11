@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 2;
+const VERSION = 3;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -354,6 +354,95 @@ function exportRecent(req){
   log(`exported ${rows.length} messages in ${list.length} chats`);
 }
 
+// ---------- 6. Twice a day: chats Eduard hasn't answered, for the To do list (Eduard asked for this on 2026-10-11) ----------
+// At 9:00 (all of yesterday) and 18:00 (today so far) it uploads textscan/<slot>: each chat with a message from someone else in
+// that window whose latest message is still theirs, with its last few messages. A Claude routine turns these into tasks/<id>
+// and then erases the message text from the scan. A missed slot (Mac off) runs as soon as the Mac is back.
+function ymd(x){ return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; }
+function dueSlot(now){
+  const d = new Date(now), at = (day, hr) => { const x = new Date(day); x.setHours(hr, 0, 0, 0); return x; };
+  const y = new Date(d); y.setDate(d.getDate() - 1);
+  if (d >= at(d, 18)) return {id: ymd(d) + "-18", from: at(d, 0), to: at(d, 18)};
+  if (d >= at(d, 9)) return {id: ymd(d) + "-09", from: at(y, 0), to: at(d, 0)};
+  return {id: ymd(y) + "-18", from: at(y, 0), to: at(y, 18)};
+}
+function scanUnanswered(slot){
+  const from = slot.from.getTime(), to = slot.to.getTime();
+  const chats = chat(`SELECT c.ROWID AS cid, c.style AS style, c.display_name AS title,
+      (SELECT m2.is_from_me FROM chat_message_join cm2 JOIN message m2 ON m2.ROWID = cm2.message_id
+        WHERE cm2.chat_id = c.ROWID AND m2.associated_message_type = 0 ORDER BY m2.date DESC LIMIT 1) AS last_me
+    FROM chat c WHERE EXISTS (SELECT 1 FROM chat_message_join cm JOIN message m ON m.ROWID = cm.message_id
+      WHERE cm.chat_id = c.ROWID AND m.is_from_me = 0 AND m.associated_message_type = 0 AND ${MS} >= ${from} AND ${MS} < ${to})`)
+    .filter(c => c.last_me === 0);
+  const names = contacts(), out = [];
+  for (const c of chats){
+    const people = chat(`SELECT h.id AS handle FROM chat_handle_join j JOIN handle h ON h.ROWID = j.handle_id WHERE j.chat_id = ${+c.cid}`).map(r => r.handle);
+    // Skip short codes (banks, verification codes, ads).
+    if (!people.length || people.every(hd => !/@/.test(hd) && digits(hd).length < 10)) continue;
+    const msgs = chat(`SELECT h.id AS handle, m.is_from_me AS me, ${MS} AS ms, m.text AS text,
+        CASE WHEN m.text IS NULL THEN hex(m.attributedBody) END AS body_hex, m.cache_has_attachments AS att
+      FROM chat_message_join cm JOIN message m ON m.ROWID = cm.message_id LEFT JOIN handle h ON h.ROWID = m.handle_id
+      WHERE cm.chat_id = ${+c.cid} AND m.associated_message_type = 0 ORDER BY m.date DESC LIMIT 8`).reverse();
+    out.push({group: c.style === 43, title: c.title || "",
+      people: people.map(hd => ({handle: hd, name: names[last10(hd)] || ""})),
+      messages: msgs.map(m => ({at: new Date(m.ms).toISOString(), from: m.me ? "Eduard" : (names[last10(m.handle)] || m.handle || "?"),
+        text: (bodyText(m) || (m.att ? "[photo or file]" : "")).slice(0, 800)}))});
+  }
+  setDoc("textscan", slot.id, {slot: slot.id, from: slot.from.toISOString(), to: slot.to.toISOString(), made_at: nowIso(), status: "new", chats: out});
+  log(`textscan ${slot.id}: ${out.length} unanswered chats`);
+}
+
+// ---------- 7. Promised callbacks ("I'll call you back in 25 min") ----------
+// Watches Eduard's own texts for a promise to call. If by the promised time (+10 min) there is no call to that number in
+// Call History and no newer text from him in that chat, it shows a reminder on this Mac and adds an urgent "callback" task.
+// It never contacts the client.
+const PROMISE = [/\b(call|ring)\s+(you|u|ya)\s+(back|in|after|soon|shortly)\b/i, /\bcall\s+back\s+in\b/i, /\b(i'?ll|i will|will)\s+call\b/i,
+  /передзвоню|перезвоню|подзвоню|позвоню|наберу/i];
+const MINUTES = /(\d+)\s*(min|mins|minutes|m\b|хв|хвилин|мин|минут)/i, HOURS = /(\d+(?:[.,]5)?)\s*(h|hr|hrs|hour|hours|год|годин|час|часа|часов)/i;
+const CALLS_DB = HOME + "/Library/Application Support/CallHistoryDB/CallHistory.storedata";
+function promisedMinutes(text){
+  if (!PROMISE.some(r => r.test(text)) || /\?\s*$/.test(text)) return null;
+  const m = text.match(MINUTES); if (m) return Math.min(+m[1], 240);
+  const h = text.match(HOURS); if (h) return Math.min(parseFloat(h[1].replace(",", ".")) * 60, 240);
+  return /later|пізніше|позже|tomorrow|завтра/i.test(text) ? null : 30; // "I'll call you back" with no time: give it 30 min
+}
+function calledSince(phone, sinceMs){
+  try {
+    const sec = (sinceMs - APPLE_EPOCH_MS) / 1000;
+    return sqlite(CALLS_DB, `SELECT COUNT(*) AS n FROM ZCALLRECORD WHERE ZADDRESS LIKE '%${last10(phone)}' AND ZDATE >= ${sec}
+      AND (ZORIGINATED = 1 OR ZANSWERED = 1)`)[0].n > 0;
+  } catch (e){ return false; }
+}
+function checkCallbacks(){
+  const st = readJson(STATE, {}), promises = st.promises || {}, now = Date.now();
+  // New promises from the last 4 hours, one-on-one chats only.
+  chat(`SELECT m.ROWID AS id, c.ROWID AS cid, ${MS} AS ms, m.text AS text, CASE WHEN m.text IS NULL THEN hex(m.attributedBody) END AS body_hex,
+      (SELECT h.id FROM chat_handle_join j JOIN handle h ON h.ROWID = j.handle_id WHERE j.chat_id = c.ROWID LIMIT 1) AS handle
+    FROM message m JOIN chat_message_join cm ON cm.message_id = m.ROWID JOIN chat c ON c.ROWID = cm.chat_id
+    WHERE m.is_from_me = 1 AND c.style = 45 AND m.associated_message_type = 0 AND ${MS} >= ${now - 4 * 3600e3}`).forEach(r => {
+    if (promises[r.id] || last10(r.handle).length < 10) return;
+    const mins = promisedMinutes(bodyText(r)); if (mins == null) return;
+    promises[r.id] = {cid: r.cid, handle: r.handle, at: r.ms, due: r.ms + (mins + 10) * 60000, text: bodyText(r).slice(0, 200), state: "waiting"};
+  });
+  const names = contacts();
+  for (const id in promises){
+    const p = promises[id];
+    if (p.state !== "waiting"){ if (now - p.at > 2 * 864e5) delete promises[id]; continue; }
+    if (now < p.due) continue;
+    const textedAfter = chat(`SELECT COUNT(*) AS n FROM chat_message_join cm JOIN message m ON m.ROWID = cm.message_id
+      WHERE cm.chat_id = ${+p.cid} AND m.is_from_me = 1 AND m.ROWID > ${+id} AND m.associated_message_type = 0`)[0].n > 0;
+    if (textedAfter || calledSince(p.handle, p.at)){ p.state = "kept"; continue; }
+    p.state = "missed";
+    const who = names[last10(p.handle)] || p.handle;
+    try { me.displayNotification(`You said you'd call ${who} back. Still waiting.`, {withTitle: "Call back " + who, soundName: "Glass"}); } catch (e){}
+    setDoc("tasks", `callback-${last10(p.handle)}-${id}`, {source: "callback", who, phone: "+1" + last10(p.handle), category: "client", urgent: true,
+      title: "Call back: you promised a call and haven't called yet", detail: `You texted: "${p.text}"`, at: new Date(p.at).toISOString(),
+      status: "open", created_at: nowIso(), created_by: "mac"});
+    log(`missed callback ${last10(p.handle)}`);
+  }
+  st.promises = promises; writeJson(STATE, Object.assign(readJson(STATE, {}), {promises}));
+}
+
 // ---------- Main loop ----------
 let lastSignInAsk = 0;
 function tick(){
@@ -371,6 +460,9 @@ function tick(){
     if (readable){
       const d = getDoc("qtaxmeta", "discovery");
       const st = readJson(STATE, {});
+      checkCallbacks();
+      const slot = dueSlot(Date.now());
+      if (readJson(STATE, {}).last_scan_slot !== slot.id){ scanUnanswered(slot); writeJson(STATE, Object.assign(readJson(STATE, {}), {last_scan_slot: slot.id})); }
       const ex = getDoc("qtaxmeta", "export");
       if (ex && ex.requested_at && ex.requested_at > (ex.done_at || "")) exportRecent(ex);
       if (!st.discovered_at || (d && d.requested_at && d.requested_at > (d.scanned_at || ""))){ discover(); writeJson(STATE, Object.assign(readJson(STATE, {}), {discovered_at: nowIso()})); }

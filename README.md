@@ -54,5 +54,7 @@ Routine changes at switch-over (artifact db -> Supabase):
   than 2 days go back to drafts), reads replies from `~/Library/Messages/chat.db` (needs Full Disk Access) to mark clients
   "Got income", drafts reminders after 3 days without an answer, finds past group texts (the Hit Em Up blast) for the client list,
   on request (`qtaxmeta/export {requested_at, days}`) saves recent conversations to `~/Desktop/Renewal Desk Texter/recent-texts.json`
-  for Claude to read (message text never goes to the database),
+  for Claude to read; at 9:00 and 18:00 uploads `textscan/<slot>` (chats whose last message is someone else's) that a routine turns into
+  `tasks` with `tools/text_tasks.py` and then erases; and watches his texts for "I'll call you back in N min": if there is no call
+  (Call History) or text to that person by then (+10 min), it shows a Mac notification and adds an urgent `callback` task,
   and writes a heartbeat to `qtaxmeta/mac`. It signs in once as Eduard; nothing secret is in the repo.
