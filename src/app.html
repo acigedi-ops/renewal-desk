@@ -107,6 +107,16 @@ a{color:var(--accent)}
 .sos-tiles{grid-template-columns:repeat(4,1fr)}
 @media (max-width:520px){.sos-tiles{grid-template-columns:repeat(2,1fr)}}
 .row.sos-plain .sev{background:var(--line)}
+/* renewals checklist */
+.steps{display:flex;flex-wrap:wrap;gap:6px}
+.step{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 10px;font-size:13px;color:inherit;cursor:pointer}
+.step .tick{width:16px;height:16px;border:1.5px solid var(--muted);border-radius:4px;display:inline-grid;place-items:center;font-size:11px;line-height:1}
+.step.on{background:var(--ok-soft);border-color:transparent;color:var(--ok)}
+.step.on .tick{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+.step.auto{cursor:default}
+.step small{font-size:11px;opacity:.75}
+.jump{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+@media (max-width:520px){.step{font-size:12.5px;padding:6px 9px}.step small{display:none}.jump .btn{flex:1 1 auto}}
 </style>
 
 <div class="wrap">
@@ -122,8 +132,9 @@ a{color:var(--accent)}
     <div class="bar">
       <div class="tabs" role="tablist">
         <button role="tab" id="tab-today" aria-selected="true">Today <span id="todayN"></span></button>
-        <button role="tab" id="tab-desk" aria-selected="false">Renewals</button>
-        <button role="tab" id="tab-todo" aria-selected="false">L&amp;I to do <span id="todoN"></span></button>
+        <button role="tab" id="tab-todo" aria-selected="false">L&amp;I licenses <span id="todoN"></span></button>
+        <button role="tab" id="tab-ren" aria-selected="false">Renewals <span id="renN"></span></button>
+        <button role="tab" id="tab-desk" aria-selected="false">Clients</button>
         <button role="tab" id="tab-inbox" aria-selected="false">Inbox <span id="inboxN"></span></button>
       </div>
       <input class="search" id="q" type="search" placeholder="Search client, license, UBI" aria-label="Search clients">
@@ -134,6 +145,7 @@ a{color:var(--accent)}
   <main id="today"></main>
   <main id="desk" hidden></main>
   <main id="todo" hidden></main>
+  <main id="ren" hidden></main>
   <main id="inbox" hidden></main>
   <p class="foot" id="foot">L&amp;I data comes from Washington L&amp;I's public contractor records and is refreshed at 8:50am and 5:50pm Pacific. Your notes, contacts and other policies are saved here.</p>
   </div>
@@ -195,7 +207,7 @@ function coiStatus(c){
 }
 
 function render(){
-  renderToday();
+  renderToday(); renderTodo(); renderRen();
   const q = $("#q").value.trim().toLowerCase();
   const rows = clients.map(c => ({c, a: assess(c)}));
   const counts = [0,0,0]; rows.forEach(r => counts[r.a.lvl]++);
@@ -254,99 +266,301 @@ function todoCard(t){
       : `<button class="btn primary" data-done="1" data-id="${esc(t.id)}">Mark fixed</button>`}</div>
   </div>`;
 }
-function renderTodo(){
-  const open = todos.filter(t => t.state !== "resolved");
-  const q = $("#q").value.trim().toLowerCase();
-  const vis = open.filter(t => !q || [t.client, t.license, t.correct?.number].some(v => String(v || "").toLowerCase().includes(q)));
-  const todoCount = open.filter(t => !t.done && t.severity !== "minor").length;
-  $("#todoN").textContent = todoCount ? `(${todoCount})` : "";
-  if (!open.length){ $("#todo").innerHTML = `<div class="empty">Nothing to fix. Every policy in the app matches what L&amp;I has on file.</div>`; return; }
-  const sorted = vis.slice().sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.client.localeCompare(b.client));
-  const group = (sev) => sorted.filter(t => !t.done && t.severity === sev && t.kind !== "suspended");
-  const lapsed = sorted.filter(t => !t.done && t.kind === "suspended").reverse();
-  const done = sorted.filter(t => t.done);
-  const sec = (title, list, note) => list.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${list.length}</span></div>${note ? `<p class="notice" style="margin:4px 0">${note}</p>` : ""}<div class="list">${list.map(todoCard).join("")}</div>` : "";
-  const minor = group("minor");
-  $("#todo").innerHTML =
-    `<p class="notice" style="margin:12px 0 0">Policies where L&amp;I's records don't match the app. The app uses your carrier portals and emails as the correct version. Rebuilt at every L&amp;I check.</p>` +
-    sec("Fix now: coverage at L&amp;I ends within 30 days", group("urgent")) +
-    sec("Suspended or expired at L&amp;I, but insured: reinstate", lapsed) +
-    sec("Fix at L&amp;I", group("fix")) +
-    (minor.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">Small differences (${minor.length}): a missing last digit or dates off by a day or two</summary><div class="list">${minor.map(todoCard).join("")}</div></details>` : "") +
-    sec("Marked fixed, waiting for L&amp;I to update", done) +
-    (vis.length ? "" : `<div class="empty">No items match.</div>`);
-}
-
-// Today: only the clients to call now, soonest L&I suspension first.
-const TODAY_WINDOW = 30;
-function callReasons(c){
+// ---- L&I licenses: everything that could get a license suspended, then the policies L&I has wrong ----
+const TODAY_WINDOW = 30, REG_WINDOW = 60, TODAY_SOON = 14;
+const openTodos = id => todos.filter(t => t.client_id === id && t.state !== "resolved" && !t.done);
+const insuredLapsed = id => openTodos(id).some(t => t.kind === "suspended");
+const matchQ = (q, ...vals) => !q || vals.some(v => String(v || "").toLowerCase().includes(q));
+// One client's L&I problems, each in a group: lapsed (registration not active), cov (insurance or bond missing or ending within 30 days), reg (registration renews within 60 days).
+function licReasons(c){
   const out = [], l = c.lni || {}, reg = l.registration || {};
-  const add = (n, text) => out.push({n, text});
+  const add = (g, n, text, ending) => out.push({g, n, text, ending: !!ending});
   if (!c.license || !l.checked_at) return out;
-  if (reg.status && reg.status !== "ACTIVE"){ const since = days(reg.suspended) ?? days(reg.expires); add(since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(reg.suspended || reg.expires) : ""}`);
-    if (todos.some(t => t.client_id === c.id && t.state !== "resolved" && !t.done && t.kind === "suspended")) add(null, "Still insured: needs a bond and filing to reinstate");
-    return out; }
-  const rn = days(reg.expires); if (rn != null && rn <= TODAY_WINDOW) add(rn, rn < 0 ? "Registration expired" : `Registration renews ${fd(reg.expires)}`);
+  if (reg.status && reg.status !== "ACTIVE"){
+    const since = days(reg.suspended) ?? days(reg.expires);
+    add("lapsed", since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(reg.suspended || reg.expires) : ""}`);
+    if (insuredLapsed(c.id)) add("lapsed", null, "Still insured: needs a bond and filing to reinstate");
+    return out;
+  }
   for (const [k, label] of [["insurance", "Liability"], ["bond", "Bond"]]){
     const x = l[k];
-    if (!x || !x.until){ add(0, `No ${label.toLowerCase()} on file with L&I`); continue; }
+    if (!x || !x.until){ add("cov", 0, `No ${label.toLowerCase()} on file with L&I`); continue; }
     const cn = days(x.cancel), un = days(x.until);
-    if (cn != null && cn <= TODAY_WINDOW) add(cn, `${label} cancels ${fd(x.cancel)}`);
-    else if (un != null && un <= TODAY_WINDOW) add(un, `${label} ends ${fd(x.until)}`);
+    if (cn != null && cn <= TODAY_WINDOW) add("cov", cn, `${label} cancels ${fd(x.cancel)}`, true);
+    else if (un != null && un <= TODAY_WINDOW) add("cov", un, `${label} ends ${fd(x.until)}`, true);
   }
-  for (const t of todos) if (t.client_id === c.id && t.state !== "resolved" && !t.done && t.severity === "urgent" && t.kind !== "suspended"){
-    const n = days(t.due); add(n ?? 0, t.kind === "missing" ? "New policy not filed with L&I" : t.title); }
+  for (const t of openTodos(c.id)) if (t.severity === "urgent" && t.kind !== "suspended"){
+    const n = days(t.due); add("cov", n ?? 0, t.kind === "missing" ? "New policy not filed with L&I" : t.title); }
   const nm = String(c.name || "").toLowerCase();
   for (const m of meta.inbox || []){
     const txt = `${m.subject} ${m.summary}`.toLowerCase();
-    if (m.client && nm && String(m.client).toLowerCase() === nm && /cancel|intent|lapse|past due|non-?pay/.test(txt)) add(null, "Cancellation notice in email");
+    if (m.client && nm && String(m.client).toLowerCase() === nm && /cancel|intent|lapse|past due|non-?pay/.test(txt)) add("cov", null, "Cancellation notice in email");
   }
+  const rn = days(reg.expires); if (rn != null && rn <= REG_WINDOW) add("reg", rn, rn < 0 ? "Registration expired" : `Registration renews ${fd(reg.expires)}`);
   return out;
 }
+function licRows(){
+  const rows = [];
+  for (const c of clients){
+    const rs = licReasons(c); if (!rs.length) continue;
+    for (const g of ["lapsed", "cov", "reg"]){
+      const gr = rs.filter(r => r.g === g); if (!gr.length) continue;
+      const ns = gr.map(r => r.n).filter(n => n != null);
+      rows.push({c, g, rs: gr, n: ns.length ? Math.min(...ns) : 0});
+    }
+  }
+  return rows;
+}
+const snoozed = r => days(r.c.followup?.date) > 0;
+const recentLapse = r => r.g === "lapsed" && (r.n >= -TODAY_WINDOW || insuredLapsed(r.c.id));
+const byN = (a, b) => a.n - b.n || a.c.name.localeCompare(b.c.name);
+function callCard(r){
+  const c = r.c, ph = c.contact?.phone, tel = String(ph || "").replace(/[^\d+]/g, "");
+  const big = r.n < 0 ? `<b>${-r.n}</b><span>days past</span>` : r.n === 0 ? `<b>Now</b><span>today</span>` : `<b>${r.n}</b><span>${r.n === 1 ? "day left" : "days left"}</span>`;
+  return `<div class="card call"><div class="left ${r.n <= 7 ? "red" : ""}">${big}</div>
+    <div class="body"><button class="btn ghost name" data-open="${esc(c.id)}" style="padding:0;text-align:left;font-size:15px">${esc(c.name)}</button>
+      <span class="notice">${c.contact?.name ? esc(c.contact.name) + " · " : ""}${ph ? `<a href="tel:${esc(tel)}">${esc(ph)}</a>` : "No phone saved"}${c.followup?.status ? " · " + esc(c.followup.status) : ""}</span>
+      <span class="why">${r.rs.map(x => `<span class="chip ${x.n != null && x.n <= 7 ? "red" : "amber"}">${esc(x.text)}</span>`).join("")}</span></div>
+    <div class="actions">${tel ? `<a class="btn" href="sms:${esc(tel)}">Text</a>` : ""}${snoozed(r) ? `<span class="notice">Next follow-up ${fd(c.followup.date)}</span><button class="btn" data-called="0" data-id="${esc(c.id)}">Back on the list</button>` : `<button class="btn primary" data-called="1" data-id="${esc(c.id)}">Called, check back in 3 days</button>`}</div></div>`;
+}
+const secH = (title, n) => `<div class="section-h"><h2>${title}</h2><span class="notice">${n}</span></div>`;
+const sec = (title, list, fn) => list.length ? `${secH(title, list.length)}<div class="list">${list.map(fn).join("")}</div>` : "";
+const fold = (title, list, fn) => list.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">${title} (${list.length})</summary><div class="list">${list.map(fn).join("")}</div></details>` : "";
+
+function renderTodo(){
+  const q = $("#q").value.trim().toLowerCase();
+  const rows = licRows();
+  const vis = rows.filter(r => matchQ(q, r.c.name, r.c.license, r.c.ubi, r.c.contact?.name));
+  const live = vis.filter(r => !snoozed(r));
+  const lapsed = live.filter(recentLapse).sort((a, b) => b.n - a.n);
+  const old = live.filter(r => r.g === "lapsed" && !recentLapse(r)).sort((a, b) => b.n - a.n);
+  const cov = live.filter(r => r.g === "cov").sort(byN);
+  const reg = live.filter(r => r.g === "reg").sort(byN);
+  const later = vis.filter(snoozed).sort(byN);
+
+  const open = todos.filter(t => t.state !== "resolved");
+  const tvis = open.filter(t => matchQ(q, t.client, t.license, t.correct?.number));
+  const fixN = open.filter(t => !t.done && t.severity !== "minor" && t.kind !== "suspended").length;
+  const callN = rows.filter(r => !snoozed(r) && (recentLapse(r) || r.g === "cov" || (r.g === "reg" && r.n <= TODAY_WINDOW))).length;
+  $("#todoN").textContent = callN + fixN ? `(${callN + fixN})` : "";
+
+  const sorted = tvis.slice().sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.client.localeCompare(b.client));
+  const group = sev => sorted.filter(t => !t.done && t.severity === sev && t.kind !== "suspended");
+  const tLapsed = sorted.filter(t => !t.done && t.kind === "suspended").reverse();
+  const tDone = sorted.filter(t => t.done), minor = group("minor");
+  const wrong = sec("Fix now: coverage at L&amp;I ends within 30 days", group("urgent"), todoCard) +
+    sec("Suspended or expired at L&amp;I, but insured: reinstate", tLapsed, todoCard) +
+    sec("Fix at L&amp;I", group("fix"), todoCard) +
+    fold("Small differences: a missing last digit or dates off by a day or two", minor, todoCard) +
+    sec("Marked fixed, waiting for L&amp;I to update", tDone, todoCard);
+
+  $("#todo").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
+    `<p class="notice" style="margin:12px 0 0">Every L&amp;I license that needs something from you so it doesn't get suspended, soonest first. Updated at every L&amp;I check (8:50am and 5:50pm).</p>` +
+    sec("Suspended or expired: call to reinstate", lapsed, callCard) +
+    sec("Will be suspended: insurance or bond ends within 30 days and nothing new is on L&amp;I", cov, callCard) +
+    sec("License renewals due in the next 60 days", reg, callCard) +
+    (lapsed.length || cov.length || reg.length ? "" : `<div class="empty">${q ? "No licenses match." : "No license needs anything right now."}</div>`) +
+    fold("Already contacted", later, callCard) +
+    fold("Lapsed more than 30 days ago", old, callCard) +
+    `<div class="section-h" style="margin-top:28px"><h2>L&amp;I shows wrong or missing policy info</h2></div>` +
+    `<p class="notice" style="margin:4px 0">Policies where L&amp;I's records don't match your carrier portals and emails (those are the correct version). Rebuilt at every L&amp;I check; an item clears itself once L&amp;I matches.</p>` +
+    (wrong || `<div class="empty">${open.length ? "No items match." : "Nothing to fix. Every policy in the app matches what L&amp;I has on file."}</div>`);
+}
+
+// ---- Renewals: every policy and bond ending in the next 60 days (or lapsed in the last 30), each with a checklist ----
+// Your ticks are saved in the `renewals` collection, one doc per client + coverage + old end date.
+// "Shows on L&I" is never ticked by hand: it is worked out from the L&I data that refreshes twice a day.
+const REN_AHEAD = 60, REN_BACK = 30, STUCK_DAYS = 3;
+let renDocs = [], outboxItems = [];
+const isGL = t => /general liab/i.test(t || ""), isBond = t => /bond/i.test(t || "");
+const ymd = s => String(s || "").slice(0, 10);
+const addDays = (s, n) => { const d = pd(s); if (!d) return ""; d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const srcName = p => p.source === "portal" ? "Portal" : p.source === "email" ? "Email" : "Added here";
+// When a coverage on L&I ends: the cancel date if it comes first, else the end date. Null for bonds "until cancelled".
+function lniEnd(x){
+  if (!x) return null;
+  const c = pd(x.cancel) ? ymd(x.cancel) : "", u = pd(x.until) ? ymd(x.until) : "";
+  if (c && (!u || c < u)) return {date: c, cancel: true};
+  return u ? {date: u, cancel: false} : null;
+}
+const renKey = (cid, kind, ends) => docId(`${cid}~${kind}~${ends}`);
+function renItems(){
+  const items = new Map();
+  for (const c of clients){
+    const l = c.lni || {}, reg = l.registration || {};
+    const active = l.checked_at && (!reg.status || reg.status === "ACTIVE");
+    const inWin = d => { const n = days(d); return n != null && n <= REN_AHEAD && n >= -REN_BACK; };
+    const fromLni = {};
+    if (active) for (const k of ["insurance", "bond"]){
+      const e = lniEnd(l[k]); if (!e || !inWin(e.date)) continue;
+      const kind = k === "insurance" ? "gl" : "bond", key = renKey(c.id, kind, e.date);
+      fromLni[k] = e.date;
+      items.set(key, {key, client_id: c.id, kind, label: k === "insurance" ? "Liability" : "Bond", ends: e.date, cancel: e.cancel,
+        carrier: l[k].carrier || "", number: l[k].number || "", base: {number: l[k].number || "", effective: ymd(l[k].effective)}, src: ["L&I"]});
+    }
+    const pols = c.policies || [];
+    for (const p of pols){
+      if (DEAD.has(p.status) || !inWin(p.expiration)) continue;
+      // a newer term of the same type is already on file
+      if (pols.some(o => o !== p && o.type === p.type && !DEAD.has(o.status) && pd(o.expiration) && ymd(o.expiration) > ymd(p.expiration))) continue;
+      const kind = isGL(p.type) ? "gl" : isBond(p.type) ? "bond" : "pol-" + String(p.type || "other").toLowerCase().replace(/[^a-z]+/g, "-");
+      const lk = kind === "gl" ? "insurance" : kind === "bond" ? "bond" : null;
+      if (lk){
+        // the same term L&I already shows: add the source to that item
+        if (fromLni[lk] && Math.abs(days(fromLni[lk]) - days(p.expiration)) <= 7){
+          const it = items.get(renKey(c.id, kind, fromLni[lk])); if (it && !it.src.includes(srcName(p))) it.src.push(srcName(p)); continue; }
+        // L&I already shows coverage running well past this term: it was renewed (any mismatch is on the L&I licenses tab)
+        const e = lniEnd(l[lk]); if (e && !e.cancel && days(e.date) > days(p.expiration) + 7) continue;
+      }
+      const ends = ymd(p.expiration), key = renKey(c.id, kind, ends);
+      if (items.has(key)) continue;
+      items.set(key, {key, client_id: c.id, kind, label: p.type || "Policy", ends, cancel: false, carrier: p.carrier || "", number: p.number || "",
+        base: lk ? {number: l[lk]?.number || "", effective: ymd(l[lk]?.effective)} : null, src: [srcName(p)], estimated: /assumed|estimat/i.test(p.notes || "")});
+    }
+  }
+  // A checklist you started stays listed after its coverage leaves the window (renewed, or dates changed) until it's done.
+  for (const d of renDocs) if (!items.has(d.id) && d.client_id) items.set(d.id, {...d, key: d.id, src: d.src || [], saved: true});
+  return [...items.values()];
+}
+const STEPS = [["quoted", "Renewal quoted / sent to client"], ["issued", "New policy or bond issued"], ["sent", "Sent to L&I"], ["onlni", "Shows on L&I"]];
+function renRow(it){
+  const c = clients.find(x => x.id === it.client_id) || {id: it.client_id, name: it.client || it.client_id, policies: []};
+  const st = renDocs.find(x => x.id === it.key)?.steps || {};
+  const lk = it.kind === "gl" ? "insurance" : it.kind === "bond" ? "bond" : null;
+  const lx = lk ? c.lni?.[lk] : null;
+  const fam = p => it.kind === "gl" ? isGL(p.type) : it.kind === "bond" ? isBond(p.type) : p.type === it.label;
+  const newer = (c.policies || []).find(p => !DEAD.has(p.status) && fam(p) && pd(p.expiration) && days(p.expiration) - days(it.ends) > 30);
+  const since = addDays(it.ends, -90);
+  const ob = lk === "bond" ? outboxItems.filter(o => o.kind === "lni_bond" && o.client_id === it.client_id && ymd(o.created_at) >= since) : [];
+  const obSent = ob.find(o => o.status === "sent");
+  const auto = {issued: newer ? "new term on file" : ob.length ? "bond uploaded" : "", sent: obSent ? "bond email sent" : ""};
+  let issued = !!(st.issued || auto.issued), onlni = false;
+  if (lk && lx){
+    const e = lniEnd(lx);
+    if (lk === "insurance") onlni = !!e && !e.cancel && days(e.date) > days(it.ends) + 7;
+    // Bonds on L&I run "until cancelled": renewing one often changes nothing there, so it counts once it's issued and L&I shows no cancel date.
+    else onlni = !pd(lx.cancel) && (it.cancel || issued || (e && days(e.date) > days(it.ends) + 7) || (!!it.base?.number && String(lx.number || "") !== it.base.number));
+  }
+  if (onlni){ issued = true; if (!auto.issued) auto.issued = "shows on L&I"; }
+  const sent = !!(st.sent || auto.sent || onlni);
+  if (onlni && !st.sent && !auto.sent) auto.sent = "shows on L&I";
+  const quoted = !!(st.quoted || issued || sent);
+  const S = {
+    quoted: {on: quoted, auto: !st.quoted && quoted ? "next step done" : ""},
+    issued: {on: issued, auto: !st.issued ? auto.issued : ""},
+    sent: {on: sent, auto: !st.sent ? auto.sent : ""},
+    onlni: {on: onlni, auto: onlni ? "L&I check" : "ticks itself at the next L&I check"}
+  };
+  const sentAt = st.sent || obSent?.sent_at || "";
+  const complete = lk ? onlni : issued;
+  const stuck = !!lk && sent && !onlni && sentAt && days(sentAt) <= -STUCK_DAYS;
+  return {it, c, st, S, lk, n: days(it.ends), complete, stuck, sentAt, doneAt: complete ? (st.issued || st.sent || it.ends) : ""};
+}
+function renCard(r){
+  const {it, c, S, n} = r, ph = c.contact?.phone, tel = String(ph || "").replace(/[^\d+]/g, "");
+  const tone = r.complete ? "ok" : n == null ? "plain" : n <= 7 ? "red" : n <= 30 ? "amber" : "plain";
+  const when = n == null ? "" : n < 0 ? `${it.cancel ? "cancelled" : "ended"} ${fd(it.ends)}` : `${it.cancel ? "cancels" : "ends"} ${fd(it.ends)} (${rel(n)})`;
+  const nm = String(c.name || "").toLowerCase(), who = String(c.contact?.name || "").toLowerCase();
+  const mails = (meta.inbox || []).filter(m => m.client && [nm, who].includes(String(m.client).toLowerCase()));
+  const steps = STEPS.filter(([k]) => r.lk || k === "quoted" || k === "issued").map(([k, label]) => {
+    const s = S[k], locked = k === "onlni" || (s.on && s.auto);
+    return `<button type="button" class="step${s.on ? " on" : ""}${locked ? " auto" : ""}" data-step="${k}"${locked ? " disabled" : ""}><span class="tick">${s.on ? "✓" : ""}</span>${label}${s.auto ? ` <small>${esc(s.auto)}</small>` : ""}</button>`;
+  }).join("");
+  return `<section class="card" data-ren="${esc(it.key)}">
+    <h3><button class="btn ghost" data-open="${esc(c.id)}" style="padding:0;font-size:15px;text-align:left">${esc(c.name)}</button><span><span class="chip ${tone}">${esc(it.label)} ${when}</span></span></h3>
+    <span class="notice">${esc(it.carrier)}${it.number ? ` <span class="mono">${esc(it.number)}</span>` : ""}${it.src?.length ? " · from " + esc(it.src.join(", ")) : ""}${it.estimated ? " · end date estimated" : ""}${ph ? ` · <a href="tel:${esc(tel)}">${esc(ph)}</a>` : ""}</span>
+    ${r.stuck ? `<span class="chip red" style="white-space:normal">Sent to L&amp;I ${-days(r.sentAt)} days ago and still not showing. Call L&amp;I or the carrier.</span>` : ""}
+    ${mails.map(m => `<span class="notice">Email ${fd(m.date)}: ${m.link ? `<a href="${esc(m.link)}" target="_blank" rel="noopener">${esc(m.subject)}</a>` : esc(m.subject)}</span>`).join("")}
+    <div class="steps">${steps}</div>
+  </section>`;
+}
+function renData(){
+  const rows = renItems().map(renRow);
+  const open = rows.filter(r => !r.complete);
+  return {rows, open, urgent: open.filter(r => r.stuck || (r.n != null && r.n <= TODAY_WINDOW))};
+}
+function renderRen(){
+  const q = $("#q").value.trim().toLowerCase();
+  const {rows, open, urgent} = renData();
+  $("#renN").textContent = urgent.length ? `(${urgent.length})` : "";
+  const vis = r => matchQ(q, r.c.name, r.c.license, r.c.contact?.name, r.it.number);
+  const o = open.filter(vis).sort((a, b) => (a.n ?? 99999) - (b.n ?? 99999) || a.c.name.localeCompare(b.c.name));
+  const stuck = o.filter(r => r.stuck), rest = o.filter(r => !r.stuck);
+  // Done: checklists finished in the last 30 days, plus liability or bond that started on L&I in the last 30 days without one.
+  const done = rows.filter(r => r.complete && vis(r) && days(r.doneAt) >= -REN_BACK);
+  const doneIds = new Set(done.map(r => r.c.id + r.lk));
+  const fresh = [];
+  for (const c of clients) for (const [k, label] of [["insurance", "Liability"], ["bond", "Bond"]]){
+    const x = c.lni?.[k], ef = days(x?.effective);
+    if (!x || ef == null || ef < -REN_BACK || pd(x.cancel) || doneIds.has(c.id + k) || !matchQ(q, c.name, c.license, c.contact?.name)) continue;
+    fresh.push({c, label, x});
+  }
+  const freshRow = f => `<div class="mail"><span class="s"><button class="btn ghost" data-open="${esc(f.c.id)}" style="padding:0;font-size:14px;text-align:left">${esc(f.c.name)}</button></span>
+    <span class="notice">${f.label} on L&amp;I: ${esc(f.x.carrier || "")} <span class="mono">${esc(f.x.number || "")}</span>, effective ${fd(f.x.effective)} until ${fd(f.x.until)}</span></div>`;
+  $("#ren").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
+    `<p class="notice" style="margin:12px 0 0">Every policy and bond ending in the next ${REN_AHEAD} days, from L&amp;I, your carrier portals and emails. Tick each step as you go. "Shows on L&amp;I" ticks itself when the next L&amp;I check sees the new policy or bond.</p>` +
+    sec(`Sent but still not on L&amp;I after ${STUCK_DAYS} days`, stuck, renCard) +
+    sec("Lapsed: not renewed yet", rest.filter(r => r.n < 0), renCard) +
+    sec("Ending in the next 30 days", rest.filter(r => r.n >= 0 && r.n <= 30), renCard) +
+    sec(`Ending in 31 to ${REN_AHEAD} days`, rest.filter(r => r.n == null || r.n > 30), renCard) +
+    (o.length ? "" : `<div class="empty">${q ? "No renewals match." : `Nothing ends in the next ${REN_AHEAD} days.`}</div>`) +
+    fold("Done this month", done, renCard) +
+    fold("New insurance or bond showing on L&amp;I (last 30 days)", fresh, freshRow);
+}
+async function onStep(b){
+  {
+    const key = b.closest("[data-ren]").dataset.ren, k = b.dataset.step;
+    const r = renItems().map(renRow).find(x => x.it.key === key); if (!r) return;
+    if (!db){ b.textContent = "Saving is unavailable in this view."; return; }
+    const {it} = r, steps = {...r.st, [k]: r.st[k] ? "" : new Date().toISOString()};
+    b.disabled = true;
+    try { await db.doc("renewals/" + key).update({client_id: it.client_id, client: r.c.name, kind: it.kind, label: it.label, ends: it.ends, cancel: !!it.cancel,
+      carrier: it.carrier || "", number: it.number || "", base: it.base || null, src: it.src || [], estimated: !!it.estimated, steps, updated_at: new Date().toISOString()}); }
+    catch { b.disabled = false; b.textContent = "Could not save"; }
+  }
+}
+$("#ren").addEventListener("click", e => {
+  const b = e.target.closest("[data-step]"); if (b){ if (!b.disabled) onStep(b); return; }
+  const o = e.target.closest("[data-open]"); if (o) openClient(o.dataset.open);
+});
+
+// ---- Today: the most urgent few from each tab ----
 function renderToday(){
   const q = $("#q").value.trim().toLowerCase();
-  const rows = clients.map(c => {
-    const rs = callReasons(c); if (!rs.length) return null;
-    const ns = rs.map(r => r.n).filter(n => n != null);
-    return {c, rs, n: ns.length ? Math.min(...ns) : 0};
-  }).filter(Boolean);
-  const snoozed = r => days(r.c.followup?.date) > 0;
-  const byN = (a, b) => a.n - b.n || a.c.name.localeCompare(b.c.name);
-  const open = rows.filter(r => !snoozed(r));
-  const insured = r => todos.some(t => t.client_id === r.c.id && t.kind === "suspended" && t.state !== "resolved" && !t.done);
-  const recent = open.filter(r => r.n < 0 && (r.n >= -TODAY_WINDOW || insured(r))).sort((a, b) => b.n - a.n);
-  const due = open.filter(r => r.n >= 0).sort(byN);
-  const old = open.filter(r => r.n < -TODAY_WINDOW && !insured(r)).sort((a, b) => b.n - a.n);
-  const later = rows.filter(snoozed).sort(byN);
-  const nCall = recent.length + due.length;
-  $("#todayN").textContent = nCall ? `(${nCall})` : "";
-  const match = r => !q || [r.c.name, r.c.license, r.c.contact?.name].some(v => String(v || "").toLowerCase().includes(q));
-  const card = r => {
-    const c = r.c, ph = c.contact?.phone, tel = String(ph || "").replace(/[^\d+]/g, "");
-    const big = r.n < 0 ? `<b>${-r.n}</b><span>days past</span>` : r.n === 0 ? `<b>Now</b><span>today</span>` : `<b>${r.n}</b><span>${r.n === 1 ? "day left" : "days left"}</span>`;
-    return `<div class="card call"><div class="left ${r.n <= 7 ? "red" : ""}">${big}</div>
-      <div class="body"><button class="btn ghost name" data-open="${esc(c.id)}" style="padding:0;text-align:left;font-size:15px">${esc(c.name)}</button>
-        <span class="notice">${c.contact?.name ? esc(c.contact.name) + " · " : ""}${ph ? `<a href="tel:${esc(tel)}">${esc(ph)}</a>` : "No phone saved"}${c.followup?.status ? " · " + esc(c.followup.status) : ""}</span>
-        <span class="why">${r.rs.map(x => `<span class="chip ${x.n != null && x.n <= 7 ? "red" : "amber"}">${esc(x.text)}</span>`).join("")}</span></div>
-      <div class="actions">${tel ? `<a class="btn" href="sms:${esc(tel)}">Text</a>` : ""}${snoozed(r) ? `<span class="notice">Next follow-up ${fd(c.followup.date)}</span><button class="btn" data-called="0" data-id="${esc(c.id)}">Back to today</button>` : `<button class="btn primary" data-called="1" data-id="${esc(c.id)}">Called, check back in 3 days</button>`}</div></div>`;
-  };
-  const vr = recent.filter(match), vd = due.filter(match), vo = old.filter(match), vl = later.filter(match);
-  const sec = (title, list) => list.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${list.length}</span></div><div class="list">${list.map(card).join("")}</div>` : "";
-  const fold = (title, list) => list.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">${title} (${list.length})</summary><div class="list">${list.map(card).join("")}</div></details>` : "";
+  const ren = renData();
+  const renClients = new Set(ren.open.map(r => r.c.id));
+  // An insurance or bond that's simply ending shows once, under Renewals with its checklist.
+  const lic = licRows().filter(r => !snoozed(r) && matchQ(q, r.c.name, r.c.license, r.c.contact?.name)).map(r => r.g === "cov" && renClients.has(r.c.id) ? {...r, rs: r.rs.filter(x => !x.ending)} : r)
+    .filter(r => r.rs.length && (r.g === "lapsed" ? r.n >= -TODAY_WINDOW : r.n <= TODAY_SOON));
+  const licTop = [...lic.filter(r => r.g === "lapsed").sort((a, b) => b.n - a.n), ...lic.filter(r => r.g !== "lapsed").sort(byN)];
+  const renTop = ren.open.filter(r => (r.stuck || (r.n != null && r.n <= TODAY_SOON)) && matchQ(q, r.c.name, r.c.license, r.c.contact?.name))
+    .sort((a, b) => (b.stuck - a.stuck) || (a.n ?? 99999) - (b.n ?? 99999));
+  const n = licTop.length + renTop.length;
+  $("#todayN").textContent = n ? `(${n})` : "";
+  const TOP = 6, cnt = s => (String($(s)?.textContent || "").match(/\d+/) || [""])[0];
+  const more = (k, label, list) => list.length > TOP ? `<div class="jump"><button class="btn" data-go="${k}">See all ${list.length} in ${label}</button></div>` : "";
+  const outN = outboxItems.filter(o => ["pending", "failed"].includes(o.status)).length, taskN = cnt("#tasksN"), inN = (meta.inbox || []).length;
   $("#today").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
-    `<p class="notice" style="margin:12px 0 0">Who to call today: anyone whose L&amp;I liability, bond or registration ends or cancels within ${TODAY_WINDOW} days, or whose new policy isn't filed with L&amp;I yet. Soonest suspension first.</p>` +
-    sec("Lapsed in the last 30 days, or lapsed but still insured: call to reinstate", vr) +
-    sec("Call before L&amp;I suspends them", vd) +
-    (vr.length || vd.length ? "" : `<div class="empty">${nCall ? "No one matches." : "No calls needed today."}</div>`) +
-    fold("Already contacted", vl) +
-    fold("Lapsed more than 30 days ago", vo);
+    `<p class="notice" style="margin:12px 0 0">The most urgent few from each tab. Tap a button to see the whole list.</p>` +
+    (licTop.length ? `${secH(`L&amp;I licenses: lapsed in the last ${TODAY_WINDOW} days or ending within ${TODAY_SOON}`, licTop.length)}<div class="list">${licTop.slice(0, TOP).map(callCard).join("")}</div>${more("todo", "L&amp;I licenses", licTop)}` : "") +
+    (renTop.length ? `${secH(`Renewals ending within ${TODAY_SOON} days`, renTop.length)}<div class="list">${renTop.slice(0, TOP).map(renCard).join("")}</div>${more("ren", "Renewals", renTop)}` : "") +
+    (n ? "" : `<div class="empty">${q ? "Nothing matches." : "Nothing urgent today."}</div>`) +
+    `<div class="section-h"><h2>Waiting on you</h2></div><div class="jump">
+      <button class="btn" data-go="outbox">Outbox${outN ? ` (${outN} to approve)` : ""}</button>
+      <button class="btn" data-go="tasks">To do${taskN ? ` (${taskN})` : ""}</button>
+      <button class="btn" data-go="inbox">Inbox${inN ? ` (${inN})` : ""}</button>
+      <button class="btn" data-go="todo">All L&amp;I licenses</button><button class="btn" data-go="ren">All renewals</button></div>`;
+}
+async function onCalled(b){
+  const c = clients.find(x => x.id === b.dataset.id); if (!c) return;
+  const d = new Date(); d.setDate(d.getDate() + 3);
+  const followup = b.dataset.called === "1" ? {status: "Contacted", date: d.toISOString().slice(0, 10)} : {...(c.followup || {}), date: ""};
+  b.disabled = true; if (!(await save(c, {followup}))) { b.disabled = false; b.textContent = "Could not save"; }
 }
 $("#today").addEventListener("click", async e => {
-  const b = e.target.closest("[data-called]");
-  if (b){ const c = clients.find(x => x.id === b.dataset.id); if (!c) return;
-    const d = new Date(); d.setDate(d.getDate() + 3);
-    const followup = b.dataset.called === "1" ? {status: "Contacted", date: d.toISOString().slice(0, 10)} : {...(c.followup || {}), date: ""};
-    b.disabled = true; if (!(await save(c, {followup}))) { b.disabled = false; b.textContent = "Could not save"; } return; }
+  const g = e.target.closest("[data-go]"); if (g){ $("#tab-" + g.dataset.go)?.click(); window.scrollTo(0, 0); return; }
+  const b = e.target.closest("[data-called]"); if (b) return onCalled(b);
+  const s = e.target.closest("[data-step]"); if (s){ if (!s.disabled) onStep(s); return; }
   const o = e.target.closest("[data-open]"); if (o) openClient(o.dataset.open);
 });
 
@@ -629,13 +843,21 @@ function openAdd(){
 $("#desk").addEventListener("click", e => { const r = e.target.closest(".row"); if (r) openClient(r.dataset.id); });
 $("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") closeSheet(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#sheet").hidden) closeSheet(); });
-$("#q").addEventListener("input", () => { render(); if (!$("#todo").hidden) renderTodo(); });
+$("#q").addEventListener("input", render);
 $("#addBtn").onclick = openAdd;
 $("#agencyBtn").onclick = openAgency;
 document.querySelectorAll(".tile").forEach(t => t.onclick = () => { filter = filter === +t.dataset.f ? null : +t.dataset.f; showTab("desk"); render(); });
-function showTab(t){ for (const k of ["today","desk","todo","inbox"]){ $("#" + k).hidden = t !== k; $("#tab-" + k).setAttribute("aria-selected", String(t === k)); } }
+function showTab(t){
+  for (const k of ["today","todo","ren","desk","inbox"]){ $("#" + k).hidden = t !== k; $("#tab-" + k).setAttribute("aria-selected", String(t === k)); }
+  // The Outbox and To do tabs live in their own files; step them aside too.
+  for (const k of ["outbox","tasks"]){ const m = $("#" + k); if (m) m.hidden = true; $("#tab-" + k)?.setAttribute("aria-selected", "false"); }
+}
+// ...and when one of those is opened, hide Renewals (they only know about the app's original tabs).
+$(".bar .tabs").addEventListener("click", e => { const b = e.target.closest("[role=tab]"); if (b && ["tab-outbox","tab-tasks"].includes(b.id)){ $("#ren").hidden = true; $("#tab-ren").setAttribute("aria-selected", "false"); } });
 $("#tab-todo").onclick = () => { showTab("todo"); renderTodo(); };
+$("#tab-ren").onclick = () => { showTab("ren"); renderRen(); };
 $("#todo").addEventListener("click", async e => {
+  const c = e.target.closest("[data-called]"); if (c) return onCalled(c);
   const b = e.target.closest("[data-done]");
   if (b){ const done = b.dataset.done === "1";
     try { await db.doc("todo/" + b.dataset.id).update({done, done_at: done ? new Date().toISOString() : ""}); }
@@ -661,6 +883,8 @@ render(); renderInbox();
   db.doc("meta/agency").onSnapshot(s => { agency = s.exists ? s.data() : {}; }, () => {});
   db.doc("meta/status").onSnapshot(s => { meta = s.exists ? s.data() : {}; render(); renderInbox(); }, () => {});
   db.collection("todo").onSnapshot(s => { todos = s.docs.map(d => ({id: d.id, ...d.data()})); renderTodo(); renderToday(); }, () => {});
+  db.collection("renewals").onSnapshot(s => { renDocs = s.docs.map(d => ({id: d.id, ...d.data()})); renderRen(); renderToday(); }, () => {});
+  db.collection("outbox").onSnapshot(s => { outboxItems = s.docs.map(d => ({id: d.id, ...d.data()})); renderRen(); renderToday(); }, () => {});
 })();
 </script>
 <script>
