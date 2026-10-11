@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 4;
+const VERSION = 5;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -443,6 +443,40 @@ function checkCallbacks(){
   st.promises = promises; writeJson(STATE, Object.assign(readJson(STATE, {}), {promises}));
 }
 
+// ---------- 9. Missed calls he hasn't returned ----------
+// Every 10 minutes: each missed incoming call in the last 3 days becomes one urgent "Call back" item (tasks/missed-<last10>),
+// and closes by itself once he calls that number or picks up a call from it. People in Contacts, Qtax clients and anyone
+// he has texted with count; an unknown number only after 2 missed calls (spam usually calls once).
+function missedCalls(){
+  const since = Date.now() - 3 * 864e5, sec = (since - APPLE_EPOCH_MS) / 1000;
+  const rows = sqlite(CALLS_DB, `SELECT ZADDRESS AS a, ZDATE AS d, ZORIGINATED AS o, ZANSWERED AS ans FROM ZCALLRECORD WHERE ZDATE >= ${sec} ORDER BY ZDATE`);
+  const byNum = {};
+  for (const r of rows){
+    const d = last10(r.a); if (d.length !== 10) continue;
+    const n = byNum[d] = byNum[d] || {missed: [], lastContact: 0};
+    const ms = r.d * 1000 + APPLE_EPOCH_MS;
+    if (!r.o && !r.ans) n.missed.push(ms); else n.lastContact = Math.max(n.lastContact, ms);
+  }
+  const names = contacts(), known = {};
+  chat("SELECT id FROM handle").forEach(r => { known[last10(r.id)] = 1; });
+  listDocs("qtax").forEach(c => { known[last10(c.phone)] = 1; });
+  for (const d in byNum){
+    const n = byNum[d], open = n.missed.filter(ms => ms > n.lastContact), id = "missed-" + d;
+    const old = getDoc("tasks", id);
+    if (!open.length){
+      if (old && old.status === "open" && old.created_by === "mac") mergeDoc("tasks", id, {status: "done", done_at: nowIso(), detail: (old.detail || "") + " You called back."});
+      continue;
+    }
+    if (!names[d] && !known[d] && open.length < 2) continue;
+    const last = Math.max.apply(null, open), at = new Date(last).toISOString();
+    if (old && (old.status === "done" ? old.done_at > at : old.at === at && old.count === open.length)) continue;
+    const when = new Date(last).toLocaleString("en-US", {weekday: "short", hour: "numeric", minute: "2-digit"});
+    setDoc("tasks", id, {source: "call", who: names[d] || "", phone: "+1" + d, category: "client", urgent: true, pinned: true,
+      title: open.length > 1 ? `Call back: ${open.length} missed calls` : "Call back: missed call", detail: `Last tried ${when}. Closes by itself when you call them back.`,
+      at, count: open.length, status: "open", done_at: "", created_at: (old && old.created_at) || nowIso(), created_by: "mac"});
+  }
+}
+
 // ---------- 8. On request: who answers the quarter texts ----------
 // Asked for by setting qtaxmeta/responders {requested_at}. For each past blast the Mac found (qtaxmeta/discovery), counts
 // whether each person texted back within 3 weeks, in any chat. Uploads counts and dates only, never message text.
@@ -485,6 +519,10 @@ function tick(){
       const d = getDoc("qtaxmeta", "discovery");
       const st = readJson(STATE, {});
       checkCallbacks();
+      if (Date.now() - (readJson(STATE, {}).missed_at || 0) > 10 * 60000){
+        try { missedCalls(); } catch (e){ log("missed calls: " + e.message); }
+        writeJson(STATE, Object.assign(readJson(STATE, {}), {missed_at: Date.now()}));
+      }
       const slot = dueSlot(Date.now());
       if (readJson(STATE, {}).last_scan_slot !== slot.id){ scanUnanswered(slot); writeJson(STATE, Object.assign(readJson(STATE, {}), {last_scan_slot: slot.id})); }
       const ex = getDoc("qtaxmeta", "export");

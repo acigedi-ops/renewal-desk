@@ -51,11 +51,13 @@
     const done = items.filter(t => t.status === "done").sort((a, b) => String(b.done_at).localeCompare(String(a.done_at))).slice(0, 30);
     const n = q("#tasksN"); if (n) n.textContent = open.length ? `(${open.length})` : "";
     if (main.hidden) return;
-    const urgent = open.filter(t => t.urgent);
+    // Missed calls and promised callbacks stay pinned at the very top until handled.
+    const isCall = t => t.source === "call" || t.source === "callback";
+    const calls = open.filter(isCall), urgent = open.filter(t => t.urgent && !isCall(t));
     const sec = (title, list) => list.length ? `<div class="section-h"><h2>${title}</h2><span class="notice">${list.length}</span></div><div class="list">${list.map(card).join("")}</div>` : "";
-    main.innerHTML = `<p class="notice" style="margin:12px 0 0">People waiting on you: unanswered texts (checked at 9 am and 6 pm), callbacks you promised, and calls. Tap Done when it's handled.</p>` +
-      sec("Urgent", urgent) +
-      CAT.map(([k, title]) => sec(title, open.filter(t => !t.urgent && (t.category || "") === k))).join("") +
+    main.innerHTML = `<p class="notice" style="margin:12px 0 0">People waiting on you: missed calls you haven't returned (they close by themselves once you call back), callbacks you promised, and unanswered texts (checked at 9 am and 6 pm). Tap Done when it's handled.</p>` +
+      sec("Call back", calls) + sec("Urgent", urgent) +
+      CAT.map(([k, title]) => sec(title, open.filter(t => !t.urgent && !isCall(t) && (t.category || "") === k))).join("") +
       (open.length ? "" : `<div class="empty">Nothing waiting. You're caught up.</div>`) +
       (done.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">Done (${done.length})</summary><div class="list">${done.map(card).join("")}</div></details>` : "");
   }
