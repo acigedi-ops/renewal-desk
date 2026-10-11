@@ -69,3 +69,11 @@ Routine changes at switch-over (artifact db -> Supabase):
   `tasks` with `tools/text_tasks.py` and then erases; and watches his texts for "I'll call you back in N min": if there is no call
   (Call History) or text to that person by then (+10 min), it shows a Mac notification and adds an urgent `callback` task,
   and writes a heartbeat to `qtaxmeta/mac`. It signs in once as Eduard; nothing secret is in the repo.
+
+## Health, backups and the free L&I check
+- `src/health.js` shows a one-line health strip under the tabs (L&I check, email check, SOS check, Mac texter, backup, stuck sends).
+- Nightly routine (fresh session on the "lni" env): `tools/backup.py /mnt/project-files/backups` (all docs + the `cois` bucket, 14 days kept,
+  writes `meta/backup`), `tools/lni_shadow.py` and `tools/health_check.py` (anything late becomes an urgent `tasks/health-<kind>-<date>`).
+- `tools/lni_shadow.py` is the L&I check as a plain script. It only writes the comparison report `meta/lni_shadow` and never changes clients.
+  `.github/workflows/lni-shadow.yml` runs it three times a day once the repository secret SUPABASE_SECRET_KEY is set.
+  When it has matched the routine for a while, the routine's L&I steps can move to it.

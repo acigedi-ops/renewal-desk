@@ -156,4 +156,13 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    # Record the outcome in meta/backup so the app's health strip shows when the last backup ran, or why it failed.
+    try:
+        main(sys.argv[1:])
+        rd.set_doc("meta", "backup", {"at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "error": ""})
+    except BaseException as e:
+        try:
+            rd.update_doc("meta", "backup", {"error": (str(e) or type(e).__name__)[:300],
+                                             "failed_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+        finally:
+            raise
