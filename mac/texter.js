@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 3;
+const VERSION = 4;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -443,6 +443,30 @@ function checkCallbacks(){
   st.promises = promises; writeJson(STATE, Object.assign(readJson(STATE, {}), {promises}));
 }
 
+// ---------- 8. On request: who answers the quarter texts ----------
+// Asked for by setting qtaxmeta/responders {requested_at}. For each past blast the Mac found (qtaxmeta/discovery), counts
+// whether each person texted back within 3 weeks, in any chat. Uploads counts and dates only, never message text.
+function responders(){
+  const blasts = ((getDoc("qtaxmeta", "discovery") || {}).blasts || []).map(b => ({at: Date.parse(b.at), phones: b.recipients.map(r => last10(r.phone))}));
+  if (!blasts.length) return mergeDoc("qtaxmeta", "responders", {scanned_at: nowIso(), people: {}, blasts: 0});
+  const since = Math.min.apply(null, blasts.map(b => b.at)), WINDOW = 21 * 864e5;
+  const inbound = {};
+  chat(`SELECT h.id AS handle, ${MS} AS ms FROM message m JOIN handle h ON h.ROWID = m.handle_id
+    WHERE m.is_from_me = 0 AND ${MS} >= ${since}`).forEach(r => { const d = last10(r.handle); if (d.length === 10) (inbound[d] = inbound[d] || []).push(r.ms); });
+  const lastEver = {};
+  chat(`SELECT h.id AS handle, MAX(${MS}) AS ms FROM message m JOIN handle h ON h.ROWID = m.handle_id WHERE m.is_from_me = 0 GROUP BY h.id`)
+    .forEach(r => { const d = last10(r.handle); if (d.length === 10 && !(lastEver[d] > r.ms)) lastEver[d] = r.ms; });
+  const people = {};
+  for (const b of blasts) for (const d of b.phones){
+    const p = people[d] = people[d] || {sent: 0, replied: 0};
+    p.sent++;
+    if ((inbound[d] || []).some(ms => ms > b.at && ms < b.at + WINDOW)) p.replied++;
+  }
+  for (const d in people) people[d].last_in = lastEver[d] ? new Date(lastEver[d]).toISOString() : "";
+  mergeDoc("qtaxmeta", "responders", {scanned_at: nowIso(), blasts: blasts.length, people});
+  log(`responders: ${Object.keys(people).length} people over ${blasts.length} texts`);
+}
+
 // ---------- Main loop ----------
 let lastSignInAsk = 0;
 function tick(){
@@ -465,6 +489,8 @@ function tick(){
       if (readJson(STATE, {}).last_scan_slot !== slot.id){ scanUnanswered(slot); writeJson(STATE, Object.assign(readJson(STATE, {}), {last_scan_slot: slot.id})); }
       const ex = getDoc("qtaxmeta", "export");
       if (ex && ex.requested_at && ex.requested_at > (ex.done_at || "")) exportRecent(ex);
+      const rs = getDoc("qtaxmeta", "responders");
+      if (rs && rs.requested_at && rs.requested_at > (rs.scanned_at || "")) responders();
       if (!st.discovered_at || (d && d.requested_at && d.requested_at > (d.scanned_at || ""))){ discover(); writeJson(STATE, Object.assign(readJson(STATE, {}), {discovered_at: nowIso()})); }
     }
   } catch (e){ error = String(e.message || e).slice(0, 200); log("error: " + error); }
