@@ -122,9 +122,9 @@
   ${discoveryCard()}
   ${draftCards(active)}
   ${progressCard()}
-  <div class="section-h"><h2>Clients · ${qLabel(quarter)}</h2><span class="notice">${active.length} active</span></div>
+  <div class="section-h"><h2>Client list · ${qLabel(quarter)}</h2><span class="notice">${active.length} get the quarter text${clients.length > active.length ? ` · ${clients.length - active.length} removed` : ""}</span></div>
   ${clients.length ? `<div class="list">${shown.map(row).join("") || `<div class="empty">No one matches.</div>`}</div>`
-    : `<div class="empty">No Qtax clients yet. Your Mac looks for last quarter's group text and offers it here, or tap <b>+ Clients</b> to paste a list.</div>`}
+    : `<div class="empty">No Qtax clients yet. Your Mac looks for the people you texted last quarter and offers them here, or tap <b>+ Clients</b> to paste a list.</div>`}
   <p class="foot">Texts go out from your own number through Messages on your Mac, only after you tap Approve &amp; send, and only between 8 am and 9 pm. Replies mark the client as "Got income" automatically.</p>`;
   }
 
@@ -148,12 +148,12 @@
   function discoveryCard(){
     const have = new Set(clients.map(c => c.id));
     const blasts = (discovery?.blasts || []).map(b => ({...b, fresh: b.recipients.filter(r => !have.has(idFor(r.phone)))})).filter(b => b.fresh.length);
-    if (!blasts.length) return discovery?.requested_at && !(discovery.scanned_at > discovery.requested_at) ? `<div class="empty">Your Mac is looking through your texts for last quarter's group…</div>` : "";
-    return `<div class="section-h"><h2>Found in your texts</h2><span class="notice">Group texts you sent before, found by your Mac</span></div>
+    if (!blasts.length) return discovery?.requested_at && !(discovery.scanned_at > discovery.requested_at) ? `<div class="empty">Your Mac is looking through your texts for last quarter's clients…</div>` : "";
+    return `<div class="section-h"><h2>People you texted before</h2><span class="notice">From your past quarter texts, found by your Mac</span></div>
       <div class="list">${blasts.slice(0, 3).map((b, i) => `<section class="card"><h3><span>${b.recipients.length} people · ${day(b.at)}</span>
-        <span><button class="btn primary" data-qblast="${i}" type="button">Use this group</button></span></h3>
+        <span><button class="btn primary" data-qblast="${i}" type="button">Add these people</button></span></h3>
         <div class="qmsg">${h(b.text)}</div>
-        <span class="notice">${b.fresh.length} new: ${h(b.fresh.slice(0, 12).map(r => r.name || phoneFmt(r.phone)).join(", "))}${b.fresh.length > 12 ? "…" : ""}. "Use this group" adds them and keeps your own wording for next quarter's text.</span></section>`).join("")}</div>`;
+        <span class="notice">${b.fresh.length} new: ${h(b.fresh.slice(0, 12).map(r => r.name || phoneFmt(r.phone)).join(", "))}${b.fresh.length > 12 ? "…" : ""}. "Add these people" puts them on your client list and keeps your wording. Each person still gets their own separate text.</span></section>`).join("")}</div>`;
   }
 
   function draftCards(active){
@@ -162,7 +162,7 @@
     const notAsked = active.filter(c => !qOf(c).status && !openText(c));
     const waiting = active.filter(c => qOf(c).status === "asked" && !openText(c));
     const group = (kind, list, title, tkey) => !list.length ? "" : `<section class="card" data-qgroup="${kind}">
-      <h3><span>${title} <span class="chip info">${list.length}</span></span><span class="notice">${h(list[0].quarter ? qLabel(list[0].quarter) : "")}</span></h3>
+      <h3><span>${title} <span class="chip info">${list.length} separate texts</span></span><span class="notice">${h(list[0].quarter ? qLabel(list[0].quarter) : "")}</span></h3>
       ${list[0].note ? `<span class="chip amber">${h(list[0].note)}</span>` : ""}
       ${kind === "ask" && !tpl(tkey).includes("{quarter}") ? `<span class="notice">This is your own wording from last time. Check the months and dates before you approve.</span>` : ""}
       <div class="qmsg">${h(list[0].body)}</div>
@@ -170,8 +170,8 @@
         <textarea rows="4" data-qtpl="${tkey}">${h(tpl(tkey))}</textarea></label></form>
         <div class="actions"><button class="btn" data-qsavetpl="${tkey}" type="button">Save message</button></div></details>
       <div class="qwho">${list.map(t => `<span class="chip plain">${h(t.name || phoneFmt(t.phone))}<button type="button" data-qdrop="${h(t.id)}" aria-label="Don't text ${h(t.name)}">×</button></span>`).join("")}</div>
-      <div class="actions"><span class="notice" data-msg></span><button class="btn" data-qdiscard="${kind}" type="button">Discard</button>
-        <button class="btn primary" data-qapprove="${kind}" type="button">Approve &amp; send ${list.length} text${list.length > 1 ? "s" : ""}</button></div></section>`;
+      <div class="actions"><span class="notice" data-msg>One-on-one: each person gets their own text, never a group chat.</span><button class="btn" data-qdiscard="${kind}" type="button">Discard</button>
+        <button class="btn primary" data-qapprove="${kind}" type="button">Approve &amp; send ${list.length} separate text${list.length > 1 ? "s" : ""}</button></div></section>`;
     return `<div class="section-h"><h2>Texts waiting for your OK</h2></div>
       ${group("ask", asks, "Quarter text", "ask_template")}${group("followup", fups, "Reminders", "followup_template")}
       ${!drafts.length ? `<div class="empty">Nothing waiting.</div>` : ""}
@@ -207,6 +207,7 @@
       <div><button class="btn ghost name" data-qedit type="button" style="padding:0">${h(c.name || phoneFmt(c.phone))}</button>
         <div class="meta">${h(meta)}</div>${reply ? `<div class="reply">${h(String(reply).slice(0, 240))}</div>` : ""}</div>
       <div class="acts">${st === "asked" && !pending ? `<button class="btn ghost" data-qremind type="button">Remind</button>` : ""}
+        ${c.active === false ? `<button class="btn ghost" data-qactive type="button">Add back</button>` : `<button class="btn ghost" data-qremove type="button" aria-label="Remove ${h(c.name)} from the list">Remove</button>`}
         <select data-qst aria-label="Status for ${h(c.name)}">${STATUS.map(([v, l]) => `<option value="${v}" ${v === st ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>`;
   }
 
@@ -255,7 +256,7 @@
         const list = texts.filter(x => x.status === "draft" && x.kind === approve.dataset.qapprove);
         if (!list.length) return;
         const live = Date.now() - new Date(mac?.seen_at || 0) < 5 * 60000;
-        if (!confirm(`Send ${list.length} text${list.length > 1 ? "s" : ""} from your phone number?\n\n"${list[0].body}"\n\n` +
+        if (!confirm(`Send ${list.length} separate text${list.length > 1 ? "s" : ""} from your phone number, one to each person? Nobody sees who else got it.\n\n"${list[0].body}"\n\n` +
           (live ? "Your Mac sends them one by one." : "Your Mac is offline: they go out when it's back on (within 2 days, or they come back here for a new OK).") )) return;
         approve.disabled = true;
         const {data} = await window.rdSupabase.auth.getSession(), now = new Date().toISOString();
@@ -276,6 +277,12 @@
         const f = Object.fromEntries([...rowEl.querySelectorAll("[data-qe]")].map(i => [i.dataset.qe, i.value.trim()]));
         if (!e164(f.phone)) return alert("Add a phone number.");
         await db.doc("qtax/" + c.id).update({...f, phone: e164(f.phone)}); editing = null; document.activeElement?.blur(); return render();
+      }
+      if (t.closest("[data-qremove]")){
+        if (!confirm(`Remove ${c.name || phoneFmt(c.phone)} from your Qtax list? They won't get quarter texts. You can add them back later.`)) return;
+        // Their unsent drafts go too, so they can't be approved by accident.
+        await inChunks(texts.filter(x => x.client_id === c.id && x.status === "draft"), x => db.doc("texts/" + x.id).update({status: "dismissed", dismissed_at: new Date().toISOString()}));
+        return db.doc("qtax/" + c.id).update({active: false});
       }
       if (t.closest("[data-qremind]")){ t.disabled = true; return draft(c, "followup"); }
     } catch (err){ alert("Something went wrong: " + (err?.message || err)); }
@@ -306,7 +313,7 @@
   async function useBlast(i){
     const have = new Set(clients.map(c => c.id));
     const b = (discovery.blasts || []).filter(x => x.recipients.some(r => !have.has(idFor(r.phone))))[i]; if (!b) return;
-    if (!confirm(`Add ${b.recipients.length} people from this group text and use its wording for the quarterly text?`)) return;
+    if (!confirm(`Add these ${b.recipients.length} people to your client list and use this wording for the quarterly text?\n\nEach person gets their own separate text. Nobody sees who else got it.`)) return;
     await addClients(b.recipients);
     // Their own words, as last sent; the quarter is whatever they wrote, so keep it unless it names one.
     await db.doc("qtaxmeta/settings").update({ask_template: b.text, ask_template_from: b.at});
