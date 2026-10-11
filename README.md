@@ -9,6 +9,15 @@ The same app as the claude.ai artifact, hosted on Cloudflare (free, commercial u
 - `public/config.js` holds the Supabase project URL and publishable key (public by design).
 - `supabase/schema.sql` creates table `docs(collection, id, data jsonb)`, the `merge_doc` function, realtime, and the private `cois` bucket. Only signed-in users can read or write.
 
+## Who can send (supabase/approval_guard.sql)
+Run once in the Supabase SQL editor (safe to re-run). It makes the database itself enforce the no-send-without-approval rule:
+- Only Eduard's account (user id `ee17d28b-…`) can read or write `docs` and the `cois` bucket, even if someone else signs up.
+- A text can become `approved` only from the website (supabase-js) signed in as Eduard, and only for one phone number. Routines (secret key)
+  and the Mac (curl) can't approve. A text goes to `sending` only from `approved`, and its body/phone can't change while approved or sending.
+- Routines (secret key) can never set an email or text to `approved`, `sending`, `sent` or `unsure`: they only write drafts.
+- An email's recipients, subject, body and attachments can't change while it is `sending`.
+If the site's own user id ever changes (new account), update `rd_is_eduard()` there.
+
 ## Outbox (emails Eduard approves)
 - `src/outbox.js` adds the Outbox tab and an "Emails" card on each client (Send bond to L&I, Welcome email). It is loaded by `build.mjs` after the app, because the L&I routine overwrites `src/app.html`.
 - `worker/index.js` serves `dist/` and handles `POST /api/outbox/send {id}`: it checks the caller's Supabase session, reads `outbox/<id>` and its PDFs with that user's token, and sends through smtp.gmail.com:465 (`worker/mail.js`) as `GMAIL_USER`. Secret `GMAIL_APP_PASSWORD` (a Gmail app password) is set in Cloudflare, never in the repo.
