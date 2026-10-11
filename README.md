@@ -36,6 +36,11 @@ Routine changes at switch-over (artifact db -> Supabase):
 ## One-time migration
 `tools/migrate.py EXPORT_DIR COIS_DIR` (EXPORT_DIR from ArtifactData list with out_dir; COIS_DIR = artifact assets saved as `<asset_id>.pdf`).
 
+## To do (src/tasks.js)
+- A "To do" tab after the Outbox for things Eduard owes people. Shared list `tasks/<id>` with `source` text, call, email or callback, so every
+  thread adds to the same place: `{source, who, phone, client_id, title, detail, category, urgent, at, status: "open"|"done", done_at, created_by}`.
+  The L&I mismatch list stays in `todo` (the L&I routine resolves anything there it did not create).
+
 ## Qtax (quarterly-tax texts from Eduard's own number)
 - `src/qtax.js` adds a "Qtax" mode next to Policies and SOS status (loaded by `build.mjs`, like the Outbox). Clients are `qtax/<id>`
   (`p` + last 10 phone digits) with one `q_2026Q3`-style field per quarter: status asked, received, filed or paid.
@@ -49,5 +54,7 @@ Routine changes at switch-over (artifact db -> Supabase):
   than 2 days go back to drafts), reads replies from `~/Library/Messages/chat.db` (needs Full Disk Access) to mark clients
   "Got income", drafts reminders after 3 days without an answer, finds past group texts (the Hit Em Up blast) for the client list,
   on request (`qtaxmeta/export {requested_at, days}`) saves recent conversations to `~/Desktop/Renewal Desk Texter/recent-texts.json`
-  for Claude to read (message text never goes to the database),
+  for Claude to read; at 9:00 and 18:00 uploads `textscan/<slot>` (chats whose last message is someone else's) that a routine turns into
+  `tasks` with `tools/text_tasks.py` and then erases; and watches his texts for "I'll call you back in N min": if there is no call
+  (Call History) or text to that person by then (+10 min), it shows a Mac notification and adds an urgent `callback` task,
   and writes a heartbeat to `qtaxmeta/mac`. It signs in once as Eduard; nothing secret is in the repo.
