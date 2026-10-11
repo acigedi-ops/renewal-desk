@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 9;
+const VERSION = 10;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -140,6 +140,15 @@ function signIn(){
   me.displayNotification("Signed in. Approved Qtax texts will go out from Messages on this Mac.", {withTitle: "Renewal Desk Texter"});
   return true;
 }
+// Upload one local file to the private "cois" bucket (the site opens it through a short-lived signed link).
+function uploadFile(localPath, bucketPath, mime){
+  writeFile(DIR + "/.h", `apikey: ${SB_KEY}\nAuthorization: Bearer ${accessToken()}\nContent-Type: ${mime}\n`);
+  const out = sh(`/usr/bin/curl -sS -m 120 -X POST -H @${sq(DIR + "/.h")} -w '\\n%{http_code}' --data-binary @${sq(localPath)} ${sq(SB_URL + "/storage/v1/object/cois/" + bucketPath.split("/").map(encodeURIComponent).join("/"))}`);
+  const status = +out.slice(out.lastIndexOf("\n") + 1);
+  // 409: already uploaded on an earlier try (the path is unique per attachment), so it's there.
+  if (!(status >= 200 && status < 300) && !(status === 409 || /Duplicate|already exists/i.test(out))) throw new Error(`upload ${bucketPath}: ${status} ${out.slice(0, 160)}`);
+  return "/coi/" + bucketPath;
+}
 const enc = encodeURIComponent;
 const listDocs = (col, filter) => http("GET", `/rest/v1/docs?select=id,data&collection=eq.${col}${filter || ""}&limit=2000`).map(r => Object.assign({id: r.id}, r.data));
 const getDoc = (col, id) => { const r = http("GET", `/rest/v1/docs?select=data&collection=eq.${col}&id=eq.${enc(id)}`); return r[0] ? r[0].data : null; };
@@ -244,7 +253,7 @@ function scanReplies(clients){
   const rows = chat(`SELECT ${msgCols} FROM message m JOIN handle h ON h.ROWID = m.handle_id
     WHERE m.is_from_me = 0 AND m.associated_message_type = 0 AND m.ROWID > ${+st.cursor} ORDER BY m.ROWID LIMIT 400`);
   const byPhone = {}; clients.forEach(c => { if (last10(c.phone).length === 10) byPhone[last10(c.phone)] = c; });
-  const patches = {};
+  const patches = {}, pics = {};  // pics["<id>|q_2026Q3"] = message ids with photos or files that belong to that quarter's reply
   for (const r of rows){
     st.cursor = Math.max(st.cursor, r.id);
     const c = byPhone[last10(r.handle)]; if (!c) continue;
@@ -263,10 +272,13 @@ function scanReplies(clients){
     // Any quarter they were asked about before this message counts as answered.
     Object.keys(c).filter(k => /^q_\d{4}Q\d$/.test(k)).forEach(k => {
       const q = Object.assign({}, c[k], p[k]);
-      if (q.status === "asked" && q.asked_at && q.asked_at <= at){ p[k] = Object.assign(q, {status: "received", received_at: at, reply: text}); }
-      // Later texts in the next two weeks ("hi" first, the amount after) join the reply, so the amount is still found.
-      else if (q.status === "received" && q.received_at && at >= q.received_at && Date.parse(at) - Date.parse(q.received_at) < 14 * 864e5
-        && text !== "[photo or file]" && !String(q.reply || "").split("\n").includes(text)) p[k] = Object.assign(q, {reply: (String(q.reply || "") + "\n" + text).slice(-500)});
+      const pic = () => { if (r.att) (pics[c.id + "|" + k] = pics[c.id + "|" + k] || []).push(r.id); };
+      if (q.status === "asked" && q.asked_at && q.asked_at <= at){ p[k] = Object.assign(q, {status: "received", received_at: at, reply: text}); pic(); }
+      // Later texts in the next two weeks ("hi" first, the amount or a statement screenshot after) join the reply.
+      else if (q.status === "received" && q.received_at && at >= q.received_at && Date.parse(at) - Date.parse(q.received_at) < 14 * 864e5){
+        if (text !== "[photo or file]" && !String(q.reply || "").split("\n").includes(text)) p[k] = Object.assign(q, {reply: (String(q.reply || "") + "\n" + text).slice(-500)});
+        pic();
+      }
     });
   }
   for (const id in patches){ mergeDoc("qtax", id, patches[id]); log(`reply from ${id}`); }
@@ -281,7 +293,37 @@ function scanReplies(clients){
         reported_status: r.amount === undefined ? "unclear" : "unconfirmed", reported_why: r.why || "", reported_text: qd.reply, reported_at: qd.received_at || nowIso()});
     } catch (e){ log(`income read failed for ${id}: ${e}`); }
   });
+  // Screenshots and PDFs they sent with it (statements): copied to the site so Eduard sees them on the income card.
+  for (const key in pics){
+    try {
+      const id = key.split("|")[0], k = key.split("|")[1], quarter = k.slice(2, 6) + "-" + k.slice(6), docId = id + "_" + quarter;
+      const old = getDoc("qtaxq", docId) || {}, files = (old.reported_files || []).slice(), c = clients.find(x => x.id === id) || {};
+      pics[key].forEach(mid => attachmentsOf(mid).forEach(a => {
+        const i = files.findIndex(f => f.aid === a.aid); if (i >= 0 && !files[i].missing) return;
+        try { files.splice(i >= 0 ? i : files.length, i >= 0 ? 1 : 0, Object.assign({aid: a.aid, name: a.name, kind: a.kind, at: a.at}, a.missing ? {missing: true} : {url: uploadFile(a.path, `qtax/${id}/${quarter}/${a.aid}-${a.safe}`, a.mime)})); }
+        catch (e){ log(`upload failed ${a.aid}: ${e}`); }
+        finally { if (a.path && a.path.indexOf(DIR + "/upload-") === 0) try { sh(`/bin/rm -f ${sq(a.path)}`); } catch (e){} }
+      }));
+      if (JSON.stringify(files) !== JSON.stringify(old.reported_files || [])) mergeDoc("qtaxq", docId, Object.assign({client_id: id, name: c.name || "", quarter, reported_files: files},
+        old.reported_status ? {} : {reported_status: "unclear", reported_why: "sent a photo or file", reported_income: "", reported_text: "", reported_at: nowIso()}));
+    } catch (e){ log(`photos failed for ${key}: ${e}`); }
+  }
   writeJson(STATE, st);
+}
+// Photos (made into JPEGs, which every browser shows; iPhone HEIC isn't) and PDFs attached to one message.
+function attachmentsOf(mid){
+  const rows = chat(`SELECT a.ROWID AS aid, a.filename AS f, a.mime_type AS mime, a.transfer_name AS name, a.total_bytes AS size, ${MS} AS ms
+    FROM attachment a JOIN message_attachment_join j ON j.attachment_id = a.ROWID JOIN message m ON m.ROWID = j.message_id WHERE j.message_id = ${+mid}`);
+  return rows.map(r => {
+    const mime = String(r.mime || "").toLowerCase(), name = String(r.name || "file"), isPdf = mime === "application/pdf" || /\.pdf$/i.test(name);
+    if (!(isPdf || mime.startsWith("image/")) || +r.size > 25e6) return null;
+    const src = String(r.f || "").replace(/^~/, HOME), base = {aid: r.aid, name, kind: isPdf ? "pdf" : "image", at: new Date(r.ms).toISOString()};
+    if (!src || sh(`/bin/test -r ${sq(src)} && echo y || echo n`).trim() !== "y") return Object.assign(base, {missing: true}); // still in iCloud
+    if (isPdf) return Object.assign(base, {path: src, mime: "application/pdf", safe: name.replace(/[^A-Za-z0-9._-]+/g, "-")});
+    const out = DIR + `/upload-${r.aid}.jpg`;
+    sh(`/usr/bin/sips -s format jpeg -s formatOptions 80 -Z 2000 ${sq(src)} --out ${sq(out)} >/dev/null 2>&1`);
+    return Object.assign(base, {path: out, mime: "image/jpeg", safe: name.replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 40) + ".jpg"});
+  }).filter(Boolean);
 }
 
 // ---------- 2. Send what Eduard approved ----------
