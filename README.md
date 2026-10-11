@@ -41,7 +41,10 @@ Routine changes at switch-over (artifact db -> Supabase):
   (`p` + last 10 phone digits) with one `q_2026Q3`-style field per quarter: status asked, received, filed or paid.
 - Texts are `texts/<id>`. The page only writes drafts and, on Eduard's "Approve & send" tap, `status: "approved"`.
   Nothing else may set "approved": routines and the Mac only write drafts.
-- `mac/texter.js` runs on Eduard's Mac as "Renewal Desk Texter" (install: double-click `mac/Install Renewal Desk Texter.command`).
+- `mac/texter.js` runs on Eduard's Mac inside "Renewal Desk Texter", a fixed app shell (`mac/loader.js`) that re-reads texter.js from
+  `~/Library/Application Support/Renewal Desk Texter/` when it changes, so updates keep Full Disk Access (install or update:
+  double-click `mac/Install Renewal Desk Texter.command`). It only ever texts one person: a single +1 number, in a one-on-one chat
+  with exactly that person, never a group chat (checked in texter.js and again in the AppleScript that sends).
   Every minute it sends approved texts through Messages (same thread, same number as always; never 9 pm to 8 am; approvals older
   than 2 days go back to drafts), reads replies from `~/Library/Messages/chat.db` (needs Full Disk Access) to mark clients
   "Got income", drafts reminders after 3 days without an answer, finds past group texts (the Hit Em Up blast) for the client list,

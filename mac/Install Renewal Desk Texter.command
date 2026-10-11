@@ -12,18 +12,33 @@ PB=/usr/libexec/PlistBuddy
 
 echo "Installing Renewal Desk Texter..."
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+osascript -e "tell application id \"$LABEL\" to quit" >/dev/null 2>&1 || true
 mkdir -p "$HOME/Applications" "$SUP" "$HOME/Library/LaunchAgents"
 chmod 700 "$SUP"
 
-rm -rf "$APP"
-osacompile -l JavaScript -s -o "$APP" "$HERE/texter.js"
-INFO="$APP/Contents/Info.plist"
-$PB -c "Delete :LSUIElement" "$INFO" 2>/dev/null || true
-$PB -c "Add :LSUIElement bool true" "$INFO"
-$PB -c "Set :CFBundleIdentifier $LABEL" "$INFO" 2>/dev/null || $PB -c "Add :CFBundleIdentifier string $LABEL" "$INFO"
-$PB -c "Delete :NSAppleEventsUsageDescription" "$INFO" 2>/dev/null || true
-$PB -c "Add :NSAppleEventsUsageDescription string Sends the Qtax texts you approve through Messages." "$INFO"
-codesign --force --deep --sign - "$APP"
+# The logic lives in texter.js next to the app's settings; updates only replace that file.
+cp "$HERE/texter.js" "$SUP/texter.js"
+chmod 600 "$SUP/texter.js"
+# The app itself is a small shell (loader.js) that stays the same, so Full Disk Access survives updates.
+# Rebuild it only when the shell changes (or the first time).
+LOADER_SUM="$(shasum "$HERE/loader.js" | cut -d' ' -f1)"
+if [ ! -d "$APP" ] || [ "$(cat "$SUP/loader.sha" 2>/dev/null)" != "$LOADER_SUM" ]; then
+  REBUILT=1
+  rm -rf "$APP"
+  osacompile -l JavaScript -s -o "$APP" "$HERE/loader.js"
+  INFO="$APP/Contents/Info.plist"
+  $PB -c "Delete :LSUIElement" "$INFO" 2>/dev/null || true
+  $PB -c "Add :LSUIElement bool true" "$INFO"
+  $PB -c "Set :CFBundleIdentifier $LABEL" "$INFO" 2>/dev/null || $PB -c "Add :CFBundleIdentifier string $LABEL" "$INFO"
+  $PB -c "Delete :NSAppleEventsUsageDescription" "$INFO" 2>/dev/null || true
+  $PB -c "Add :NSAppleEventsUsageDescription string Sends the Qtax texts you approve through Messages." "$INFO"
+  codesign --force --deep --sign - "$APP"
+  # The old Full Disk Access entry belonged to the previous build; clear it so the switch works for this one.
+  tccutil reset SystemPolicyAllFiles "$LABEL" >/dev/null 2>&1 || true
+  echo "$LOADER_SUM" > "$SUP/loader.sha"
+else
+  REBUILT=0
+fi
 
 PLIST_XML="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
@@ -47,10 +62,14 @@ else
 fi
 
 echo
-echo "Installed. A Renewal Desk sign-in box will pop up: sign in once."
-echo
-echo "Last step: in the System Settings window that opens, turn ON 'Renewal Desk Texter' under Full Disk Access."
-echo "If it isn't in the list, drag it in from the Finder window that opens next to it."
-sleep 2
-open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-open -R "$APP"
+if [ "$REBUILT" = 1 ]; then
+  echo "Installed. If a Renewal Desk sign-in box pops up, sign in once."
+  echo
+  echo "Last step: in the System Settings window that opens, turn ON 'Renewal Desk Texter' under Full Disk Access."
+  echo "If it isn't in the list, click + and add it from the Applications folder in your home folder (Finder shows it)."
+  sleep 2
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+  open -R "$APP"
+else
+  echo "Updated. Nothing else to do."
+fi
