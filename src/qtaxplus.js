@@ -100,7 +100,7 @@
       if (t.closest("[data-qpcancel]")){ editing = null; document.activeElement?.blur(); return refresh(); }
       if (t.closest("[data-qpsave]")){
         const f = Object.fromEntries([...row.querySelectorAll("[data-qpf]")].map(i => [i.dataset.qpf, i.value.trim()]));
-        await db.doc(`qtaxq/${p.id}_${k}`).set({client_id: p.id, name: p.name || "", quarter: k, income: num(f.income), tax: num(f.tax), note: f.note || "", updated_at: new Date().toISOString()});
+        await db.doc(`qtaxq/${p.id}_${k}`).update({client_id: p.id, name: p.name || "", quarter: k, income: num(f.income), tax: num(f.tax), note: f.note || "", updated_at: new Date().toISOString()});
         editing = null; document.activeElement?.blur(); return refresh();
       }
       if (t.closest("[data-qpdnt]")){
