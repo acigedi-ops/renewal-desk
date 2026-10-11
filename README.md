@@ -12,6 +12,8 @@ The same app as the claude.ai artifact, hosted on Cloudflare (free, commercial u
 ## Outbox (emails Eduard approves)
 - `src/outbox.js` adds the Outbox tab and an "Emails" card on each client (Send bond to L&I, Welcome email). It is loaded by `build.mjs` after the app, because the L&I routine overwrites `src/app.html`.
 - `worker/index.js` serves `dist/` and handles `POST /api/outbox/send {id}`: it checks the caller's Supabase session, reads `outbox/<id>` and its PDFs with that user's token, and sends through smtp.gmail.com:465 (`worker/mail.js`) as `GMAIL_USER`. Secret `GMAIL_APP_PASSWORD` (a Gmail app password) is set in Cloudflare, never in the repo.
+- If the connection drops after Gmail has the whole email, the Worker marks it `unsure` instead of `failed`, so it can't be resent by one tap: the Outbox asks Eduard to check his Sent mail ("It went out" / "It didn't go out"). A `sending` older than 5 minutes is shown the same way.
+- `.claude/settings.json` denies the Gmail connector's send, reply and forward tools to any Claude session working in this repo (routines included), so the only way an email leaves is the Approve & send tap.
 - `tools/outbox.py` queues emails from routines; `tools/OUTBOX_ROUTINE_STEP.md` is the welcome-email step for the twice-daily routine.
 
 ## Data layout (same as the artifact db)
