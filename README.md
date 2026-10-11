@@ -36,6 +36,11 @@ Routine changes at switch-over (artifact db -> Supabase):
 ## One-time migration
 `tools/migrate.py EXPORT_DIR COIS_DIR` (EXPORT_DIR from ArtifactData list with out_dir; COIS_DIR = artifact assets saved as `<asset_id>.pdf`).
 
+## To do (src/tasks.js)
+- A "To do" tab after the Outbox for things Eduard owes people. Shared list `tasks/<id>` with `source` text, call, email or callback, so every
+  thread adds to the same place: `{source, who, phone, client_id, title, detail, category, urgent, at, status: "open"|"done", done_at, created_by}`.
+  The L&I mismatch list stays in `todo` (the L&I routine resolves anything there it did not create).
+
 ## Qtax (quarterly-tax texts from Eduard's own number)
 - `src/qtax.js` adds a "Qtax" mode next to Policies and SOS status (loaded by `build.mjs`, like the Outbox). Clients are `qtax/<id>`
   (`p` + last 10 phone digits) with one `q_2026Q3`-style field per quarter: status asked, received, filed or paid.
