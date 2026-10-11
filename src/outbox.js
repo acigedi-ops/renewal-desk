@@ -2,10 +2,13 @@
 // Kept out of src/app.html, which the L&I routine overwrites; build.mjs loads this after the app's own scripts.
 // Data: collection `outbox`, one doc per email:
 //   {kind: "lni_bond"|"welcome", client_id, client_name, to: [], cc: [], subject, body,
-//    attachments: [{file, url: "/coi/<path>"}], status: "pending"|"sending"|"sent"|"failed"|"dismissed",
-//    created_at, created_by: "site"|"routine", source, sent_at, error}
+//    attachments: [{file, url: "/coi/<path>"}], status: "pending"|"sending"|"sent"|"failed"|"unsure"|"dismissed",
+//    created_at, created_by: "site"|"routine", source, sent_at, error, claimed_at}
+// "unsure" means Gmail may have it (the Worker lost the connection after handing it over). It can't be sent again with one tap:
+// Eduard checks his Sent mail and taps "It went out" or "It didn't go out". A "sending" that is older than STUCK_MIN is shown the same way.
 (() => {
   const LNI_TO = "tukwila@lni.wa.gov";
+  const STUCK_MIN = 5;
   const SIGNATURE = "--\nEduard Kaplun\nFounder\nRhino Insurance Group LLC\n(253)-335-9649\nEduard@rhino.insure\nrhinoinsuranceco.com";
   const q = s => document.querySelector(s);
   document.head.insertAdjacentHTML("beforeend", `<style>.bar .tabs{overflow-x:auto;max-width:100%;scrollbar-width:none}.bar .tabs button{white-space:nowrap}</style>`);
@@ -55,8 +58,12 @@
   function hideOutbox(){ main.hidden = true; tabBtn.setAttribute("aria-selected", "false"); }
 
   // ---- List ----
+  const stuck = x => x.status === "unsure" ||
+    (x.status === "sending" && Date.now() - new Date(x.claimed_at || x.created_at || 0) > STUCK_MIN * 60000);
+  // A "sending" email turns into "check your Sent mail" after a few minutes even if nothing else changes.
+  setInterval(() => { if (items.some(x => x.status === "sending")) render(); }, 60000);
   function render(){
-    const open = items.filter(x => ["pending", "failed", "sending"].includes(x.status)).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    const open = items.filter(x => ["pending", "failed", "sending", "unsure"].includes(x.status)).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     const sent = items.filter(x => x.status === "sent").sort((a, b) => String(b.sent_at).localeCompare(String(a.sent_at))).slice(0, 25);
     const n = q("#outboxN"); if (n) n.textContent = open.length ? String(open.length) : "";
     if (main.hidden) return;
@@ -69,7 +76,10 @@
   }
   const kindChip = k => k === "lni_bond" ? `<span class="chip info">L&amp;I bond</span>` : k === "welcome" ? `<span class="chip ok">Welcome</span>` : `<span class="chip plain">${h(k)}</span>`;
   function card(x){
-    const st = x.status === "failed" ? `<span class="chip red">Not sent: ${h(x.error || "error")}</span>` : x.status === "sending" ? `<span class="chip amber">Sending…</span>` : "";
+    const unsure = stuck(x);
+    const st = unsure ? `<span class="chip amber">Might have gone out${x.error ? `: ${h(x.error)}` : ""}</span>
+        <div class="notice">Check the Sent folder of Eduard@rhino.insure for this email, then tell the Outbox what you found. It won't send again until you do.</div>`
+      : x.status === "failed" ? `<span class="chip red">Not sent: ${h(x.error || "error")}</span>` : x.status === "sending" ? `<span class="chip amber">Sending…</span>` : "";
     return `<section class="card" data-ob="${h(x.id)}">
       <h3><span>${kindChip(x.kind)} ${h(x.client_name || "")}</span><span class="notice">${x.created_by === "routine" ? "Prefilled from email" : "Prefilled"} ${when(x.created_at)}</span></h3>
       ${x.source ? `<span class="notice">${h(x.source)}</span>` : ""}${st}
@@ -82,8 +92,9 @@
       <div>${(x.attachments || []).map((a, i) => `<div class="pol"><span><a href="${h(a.url)}" target="_blank" rel="noopener">${h(a.file || "attachment.pdf")}</a></span><button class="btn ghost" data-rm="${i}" type="button">Remove</button></div>`).join("") || `<span class="notice">No attachments.</span>`}
         <label class="btn ghost" style="display:inline-block;margin-top:6px">+ Attach PDF<input type="file" accept="application/pdf" data-add hidden multiple></label></div>
       <div class="actions"><span class="notice" data-msg></span>
-        <button class="btn" data-dismiss type="button">Dismiss</button><button class="btn" data-save type="button">Save</button>
-        <button class="btn primary" data-send type="button" ${x.status === "sending" ? "disabled" : ""}>Approve &amp; send</button></div>
+        ${unsure ? `<button class="btn" data-wentout type="button">It went out</button><button class="btn" data-notout type="button">It didn't go out</button>`
+          : `<button class="btn" data-dismiss type="button">Dismiss</button><button class="btn" data-save type="button">Save</button>
+        <button class="btn primary" data-send type="button" ${x.status === "sending" ? "disabled" : ""}>Approve &amp; send</button>`}</div>
     </section>`;
   }
   const fields = el => Object.fromEntries([...el.querySelectorAll("[data-f]")].map(i => [i.dataset.f, ["to", "cc"].includes(i.dataset.f) ? list(i.value) : i.value]));
@@ -100,6 +111,11 @@
       } else if (e.target.closest("[data-dismiss]")){
         if (!confirm("Dismiss this email without sending it?")) return;
         await ref.update({status: "dismissed", dismissed_at: new Date().toISOString()});
+      } else if (e.target.closest("[data-wentout]")){
+        await ref.update({status: "sent", sent_at: x.sent_at || new Date().toISOString(), sent_by: "checked Sent mail", error: ""});
+      } else if (e.target.closest("[data-notout]")){
+        if (!confirm("You checked your Sent mail and it isn't there? It goes back to waiting for your Approve & send.")) return;
+        await ref.update({status: "pending", error: "", unsure_at: ""});
       } else if (e.target.closest("[data-save]")){
         await ref.update(fields(el)); say("Saved.");
       } else if (e.target.closest("[data-send]")){
@@ -111,7 +127,8 @@
         const {data} = await window.rdSupabase.auth.getSession();
         const r = await fetch("/api/outbox/send", {method: "POST", headers: {"Content-Type": "application/json", Authorization: `Bearer ${data.session?.access_token || ""}`}, body: JSON.stringify({id})});
         const out = await r.json().catch(() => ({}));
-        if (!r.ok){ e.target.disabled = false; say("Not sent: " + (out.error || r.status)); alert("Not sent: " + (out.error || `error ${r.status}`)); }
+        if (out.unsure){ say(out.error); alert(out.error); }
+        else if (!r.ok){ e.target.disabled = false; say("Not sent: " + (out.error || r.status)); alert("Not sent: " + (out.error || `error ${r.status}`)); }
         else alert(`Sent to ${f.to.join(", ")}.`);
       }
     } catch (err){ say("Could not save: " + (err?.message || err)); alert("Something went wrong: " + (err?.message || err)); }

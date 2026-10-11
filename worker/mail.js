@@ -57,18 +57,23 @@ export function buildMime(msg){
   return lines.join("\r\n");
 }
 
+// Longest wait for one Gmail answer; without it a silent connection would leave the email stuck on "sending".
+const REPLY_TIMEOUT_MS = 30000;
+
 // Minimal SMTP client over an already-open TLS socket: {readable: ReadableStream<Uint8Array>, writable: WritableStream}.
 export async function smtpSend(socket, {user, pass, from, rcpts, data, helo = "renewal-desk"}){
   const reader = socket.readable.getReader();
   const writer = socket.writable.getWriter();
-  let buf = "";
+  let buf = "", bodySent = false;
   const transcript = [];
   async function reply(){
     // A reply is one or more lines "NNN-text" ending with "NNN text".
     for (;;){
       const m = buf.match(/^(?:\d{3}-[^\n]*\n)*(\d{3})(?: [^\n]*)?\n/);
       if (m){ buf = buf.slice(m[0].length); transcript.push(m[0].trim()); return {code: +m[1], text: m[0].trim()}; }
-      const {value, done} = await reader.read();
+      let timer;
+      const {value, done} = await Promise.race([reader.read(), new Promise((_, no) => { timer = setTimeout(() => no(new Error("SMTP timed out waiting for Gmail")), REPLY_TIMEOUT_MS); })])
+        .finally(() => clearTimeout(timer));
       if (done) throw new Error("SMTP connection closed" + (transcript.length ? `; last reply: ${transcript.at(-1)}` : ""));
       buf += dec.decode(value, {stream: true}).replace(/\r\n/g, "\n");
     }
@@ -90,9 +95,15 @@ export async function smtpSend(socket, {user, pass, from, rcpts, data, helo = "r
     await cmd("DATA", [354]);
     // Dot-stuff lines that start with "." and end with <CRLF>.<CRLF>.
     const body = data.replace(/\r\n\./g, "\r\n..");
+    // From here on Gmail may have taken the message even if we never see its answer, so an error is "maybe sent", not "failed".
+    bodySent = true;
     const done = await cmd((body.startsWith(".") ? "." : "") + body + (body.endsWith("\r\n") ? "" : "\r\n") + ".", [250], "message");
     await write("QUIT\r\n").catch(() => {});
     return done.text;
+  } catch (e){
+    // A clear rejection of the message (a 5xx/4xx answer to it) means it did not go out; anything else after the body is unknown.
+    if (bodySent && !/^SMTP message -> [45]\d\d/.test(String(e?.message))) e.maybeSent = true;
+    throw e;
   } finally {
     try { reader.releaseLock(); writer.releaseLock(); await socket.close?.(); } catch {}
   }

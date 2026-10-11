@@ -97,7 +97,7 @@ def main():
     if a.cmd == "list":
         for r in list_docs("outbox"):
             d = r["data"]
-            if d.get("status") in ("pending", "failed", "sending"):
+            if d.get("status") in ("pending", "failed", "sending", "unsure"):
                 print(json.dumps({"id": r["id"], "status": d["status"], "subject": d.get("subject"), "to": d.get("to")}))
         return
     if not a.client_id or not a.pdf:
