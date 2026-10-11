@@ -81,11 +81,13 @@
 
   // ---- Helpers over the data ----
   const qOf = c => c[qKey(quarter)] || {};
+  // Clients who get quarter texts: on the list, and not on the do-not-text list (do_not_text: they asked to stop, or Eduard set it).
+  const textable = c => c.active !== false && !c.do_not_text;
   const openText = (c, kind) => texts.find(t => t.client_id === c.id && t.quarter === quarter && OPEN.includes(t.status) && (!kind || t.kind === kind));
   const tpl = k => settings[k] || DEFAULTS[k];
   // Drafts that can be approved right now: this quarter's, for clients still on the list. Bulk Approve and Discard act on exactly these.
   const shownDrafts = kind => texts.filter(t => t.status === "draft" && (!kind || t.kind === kind) && (t.quarter || quarter) === quarter
-    && clients.some(c => c.id === t.client_id && c.active !== false));
+    && clients.some(c => c.id === t.client_id && textable(c)));
   // Exactly the drafts listed on the card whose button was tapped (not ones that arrived after it was drawn).
   const onCard = el => { const ids = new Set((el.dataset.qids || "").split(",")); return texts.filter(t => ids.has(t.id) && t.status === "draft"); };
   async function draft(c, kind){
@@ -100,7 +102,7 @@
   function render(force){
     if (root.hidden || !db) return;
     if (!force && root.contains(document.activeElement) && document.activeElement.matches("input,textarea")) return; // don't wipe typing
-    const active = clients.filter(c => c.active !== false);
+    const active = clients.filter(textable);
     const st = c => qOf(c).status || "";
     const n = {none: active.filter(c => !st(c)).length, asked: active.filter(c => st(c) === "asked").length,
       received: active.filter(c => st(c) === "received").length, done: active.filter(c => ["filed", "paid"].includes(st(c))).length};
@@ -232,7 +234,8 @@
     const pending = openText(c);
     const meta = [phoneFmt(c.phone), s.asked_at && `asked ${day(s.asked_at)}`, s.followups && `${s.followups} reminder${s.followups > 1 ? "s" : ""}`,
       s.received_at && `income ${day(s.received_at)}`, s.filed_at && `filed ${day(s.filed_at)}`, s.paid_at && `paid ${day(s.paid_at)}`,
-      pending && (pending.status === "draft" ? "text waiting for your OK" : "text sending"), c.active === false && "not a Qtax client now"].filter(Boolean).join(" · ");
+      pending && (pending.status === "draft" ? "text waiting for your OK" : "text sending"), c.active === false && "not a Qtax client now",
+      c.do_not_text && `do not text${c.do_not_text_reason ? `: ${c.do_not_text_reason}` : ""}`].filter(Boolean).join(" · ");
     // The reply that marked them "Got income", or anything they texted since being asked.
     const reply = s.reply || (s.asked_at && c.last_reply?.at > s.asked_at ? c.last_reply.text : "");
     if (editing === c.id) return `<div class="qrow" data-qc="${h(c.id)}"><form class="form full" onsubmit="return false">
@@ -243,7 +246,7 @@
     return `<div class="qrow ${c.active === false ? "off" : ""}" data-qc="${h(c.id)}">
       <div><button class="btn ghost name" data-qedit type="button" style="padding:0">${h(c.name || phoneFmt(c.phone))}</button>
         <div class="meta">${h(meta)}</div>${reply ? `<div class="reply">${h(String(reply).slice(0, 240))}</div>` : ""}</div>
-      <div class="acts">${st === "asked" && !pending ? `<button class="btn ghost" data-qremind type="button">Remind</button>` : ""}
+      <div class="acts">${c.do_not_text ? `<span class="chip red">Do not text</span>` : ""}${st === "asked" && !pending && !c.do_not_text ? `<button class="btn ghost" data-qremind type="button">Remind</button>` : ""}
         ${c.active === false ? `<button class="btn ghost" data-qactive type="button">Add back</button>` : `<button class="btn ghost" data-qremove type="button" aria-label="Remove ${h(c.name)} from the list">Remove</button>`}
         <select data-qst aria-label="Status for ${h(c.name)}">${STATUS.map(([v, l]) => `<option value="${v}" ${v === st ? "selected" : ""}>${l}</option>`).join("")}</select></div></div>`;
   }
@@ -268,11 +271,11 @@
       if (t.closest("#qAddSave")) return addPasted();
       const blast = t.closest("[data-qblast]"); if (blast) return useBlast(+blast.dataset.qblast);
       if (t.closest("#qDraftAll")){
-        const list = clients.filter(c => c.active !== false && !qOf(c).status && !openText(c));
+        const list = clients.filter(c => textable(c) && !qOf(c).status && !openText(c));
         t.disabled = true; await inChunks(list, c => draft(c, "ask")); return;
       }
       if (t.closest("#qDraftFup")){
-        const list = clients.filter(c => c.active !== false && qOf(c).status === "asked" && !openText(c));
+        const list = clients.filter(c => textable(c) && qOf(c).status === "asked" && !openText(c));
         t.disabled = true; await inChunks(list, c => draft(c, "followup")); return;
       }
       const save = t.closest("[data-qsavetpl]"); if (save){
