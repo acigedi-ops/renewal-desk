@@ -39,7 +39,7 @@
   const fill = (tpl, c, k) => String(tpl).replaceAll("{name}", String(c.name || "").trim().split(/\s+/)[0] || "").replaceAll("{quarter}", qUk(k)).replace(/\s+([,!.])/g, "$1");
 
   const STATUS = [["", "Not asked"], ["asked", "Asked"], ["received", "Got income"], ["filed", "Filed"], ["paid", "Paid"]];
-  const OPEN = ["draft", "approved", "sending"];
+  const OPEN = ["draft", "approved", "sending", "unsure"];
 
   let db = null, clients = [], texts = [], settings = {}, mac = null, discovery = null, responders = null;
   let quarter = filingQuarter(), filter = null, editing = null, adding = false;
@@ -83,6 +83,11 @@
   const qOf = c => c[qKey(quarter)] || {};
   const openText = (c, kind) => texts.find(t => t.client_id === c.id && t.quarter === quarter && OPEN.includes(t.status) && (!kind || t.kind === kind));
   const tpl = k => settings[k] || DEFAULTS[k];
+  // Drafts that can be approved right now: this quarter's, for clients still on the list. Bulk Approve and Discard act on exactly these.
+  const shownDrafts = kind => texts.filter(t => t.status === "draft" && (!kind || t.kind === kind) && (t.quarter || quarter) === quarter
+    && clients.some(c => c.id === t.client_id && c.active !== false));
+  // Exactly the drafts listed on the card whose button was tapped (not ones that arrived after it was drawn).
+  const onCard = el => { const ids = new Set((el.dataset.qids || "").split(",")); return texts.filter(t => ids.has(t.id) && t.status === "draft"); };
   async function draft(c, kind){
     const id = `${kind}-${quarter}-${c.id}-${Date.now().toString(36)}`;
     await db.doc("texts/" + id).set({client_id: c.id, name: c.name, phone: c.phone, kind, quarter,
@@ -186,7 +191,7 @@
   }
 
   function draftCards(active){
-    const drafts = texts.filter(t => t.status === "draft");
+    const drafts = shownDrafts();
     const asks = drafts.filter(t => t.kind === "ask"), fups = drafts.filter(t => t.kind === "followup");
     const notAsked = active.filter(c => !qOf(c).status && !openText(c));
     const waiting = active.filter(c => qOf(c).status === "asked" && !openText(c));
@@ -199,8 +204,8 @@
         <textarea rows="4" data-qtpl="${tkey}">${h(tpl(tkey))}</textarea></label></form>
         <div class="actions"><button class="btn" data-qsavetpl="${tkey}" type="button">Save message</button></div></details>
       <div class="qwho">${list.map(t => `<span class="chip plain">${h(t.name || phoneFmt(t.phone))}<button type="button" data-qdrop="${h(t.id)}" aria-label="Don't text ${h(t.name)}">×</button></span>`).join("")}</div>
-      <div class="actions"><span class="notice" data-msg>One-on-one: each person gets their own text, never a group chat.</span><button class="btn" data-qdiscard="${kind}" type="button">Discard</button>
-        <button class="btn primary" data-qapprove="${kind}" type="button">Approve &amp; send ${list.length} separate text${list.length > 1 ? "s" : ""}</button></div></section>`;
+      <div class="actions"><span class="notice" data-msg>One-on-one: each person gets their own text, never a group chat.</span><button class="btn" data-qdiscard="${kind}" data-qids="${h(list.map(t => t.id).join(","))}" type="button">Discard</button>
+        <button class="btn primary" data-qapprove="${kind}" data-qids="${h(list.map(t => t.id).join(","))}" type="button">Approve &amp; send ${list.length} separate text${list.length > 1 ? "s" : ""}</button></div></section>`;
     return `<div class="section-h"><h2>Texts waiting for your OK</h2></div>
       ${group("ask", asks, "Quarter text", "ask_template")}${group("followup", fups, "Reminders", "followup_template")}
       ${!drafts.length ? `<div class="empty">Nothing waiting.</div>` : ""}
@@ -211,10 +216,13 @@
 
   function progressCard(){
     const live = texts.filter(t => ["approved", "sending"].includes(t.status));
-    const failed = texts.filter(t => t.status === "failed");
-    if (!live.length && !failed.length) return "";
+    const failed = texts.filter(t => t.status === "failed"), unsure = texts.filter(t => t.status === "unsure");
+    if (!live.length && !failed.length && !unsure.length) return "";
     return `<section class="card"><h3>Sending from your Mac</h3>
       ${live.length ? `<span class="notice">${live.length} text${live.length > 1 ? "s" : ""} still to go. Your Mac sends them one by one.</span>` : ""}
+      ${unsure.map(t => `<div class="pol"><span>${h(t.name || phoneFmt(t.phone))} <span class="chip amber">Not sure it went out</span>
+        <span class="notice">Check Messages on your phone, then tap one.</span></span>
+        <span><button class="btn ghost" data-qwent="${h(t.id)}" data-yes="1" type="button">It went out</button><button class="btn ghost" data-qwent="${h(t.id)}" data-yes="0" type="button">It didn't go out</button></span></div>`).join("")}
       ${failed.map(t => `<div class="pol"><span>${h(t.name || phoneFmt(t.phone))} <span class="chip red">Not sent: ${h(t.error || "error")}</span></span>
         <span><button class="btn ghost" data-qretry="${h(t.id)}" type="button">Send again</button><button class="btn ghost" data-qdrop="${h(t.id)}" type="button">Dismiss</button></span></div>`).join("")}</section>`;
   }
@@ -284,19 +292,28 @@
       }
       const drop = t.closest("[data-qdrop]"); if (drop) return db.doc("texts/" + drop.dataset.qdrop).update({status: "dismissed", dismissed_at: new Date().toISOString()});
       const discard = t.closest("[data-qdiscard]"); if (discard){
-        const list = texts.filter(x => x.status === "draft" && x.kind === discard.dataset.qdiscard);
+        const list = onCard(discard);
         if (!confirm(`Discard ${list.length} unsent text${list.length > 1 ? "s" : ""}?`)) return;
         return inChunks(list, x => db.doc("texts/" + x.id).update({status: "dismissed", dismissed_at: new Date().toISOString()}));
       }
       const approve = t.closest("[data-qapprove]"); if (approve){
-        const list = texts.filter(x => x.status === "draft" && x.kind === approve.dataset.qapprove);
+        const list = onCard(approve);
         if (!list.length) return;
         const live = Date.now() - new Date(mac?.seen_at || 0) < 5 * 60000;
-        if (!confirm(`Send ${list.length} separate text${list.length > 1 ? "s" : ""} from your phone number, one to each person? Nobody sees who else got it.\n\n"${list[0].body}"\n\n` +
+        if (!confirm(`Send ${list.length} separate ${qLabel(quarter)} text${list.length > 1 ? "s" : ""} from your phone number, one to each of the ${list.length} people shown? Nobody sees who else got it.\n\n"${list[0].body}"\n\n` +
           (live ? "Your Mac sends them one by one." : "Your Mac is offline: they go out when it's back on (within 2 days, or they come back here for a new OK).") )) return;
         approve.disabled = true;
         const {data} = await window.rdSupabase.auth.getSession(), now = new Date().toISOString();
         await inChunks(list, x => db.doc("texts/" + x.id).update({status: "approved", approved_at: now, approved_by: data.session?.user?.email || "", note: ""}));
+        return;
+      }
+      const sure = t.closest("[data-qwent]"); if (sure){
+        const x = texts.find(i => i.id === sure.dataset.qwent), now = new Date().toISOString();
+        if (sure.dataset.yes === "1"){
+          await db.doc("texts/" + x.id).update({status: "sent", sent_at: now, error: "", note: "You confirmed it went out"});
+          const c = clients.find(i => i.id === x.client_id), k = qKey(x.quarter || quarter);
+          if (c){ const q = c[k] || {}; await db.doc("qtax/" + c.id).update({[k]: x.kind === "followup" ? {...q, followups: (q.followups || 0) + 1, last_followup_at: now} : {...q, status: q.status || "asked", asked_at: q.asked_at || now}}); }
+        } else await db.doc("texts/" + x.id).update({status: "draft", error: "", note: "Didn't go out. Approve again to send."});
         return;
       }
       const retry = t.closest("[data-qretry]"); if (retry){
