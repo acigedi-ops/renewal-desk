@@ -8,7 +8,7 @@
   const q = s => document.querySelector(s);
   const h = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const when = t => t ? new Date(t).toLocaleString("en-US", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"}) : "";
-  const SRC = {text: ["Text", "info"], call: ["Call", "amber"], email: ["Email", "plain"], callback: ["Call back", "red"]};
+  const SRC = {text: ["Text", "info"], call: ["Call", "amber"], email: ["Email", "plain"], callback: ["Call back", "red"], qtax: ["Quarterly taxes", "amber"], health: ["Site check", "red"]};
   const CAT = [["client", "Clients"], ["qtax", "Quarterly taxes"], ["insurer", "Insurance companies and partners"], ["bills", "Bills"], ["personal", "Personal"], ["", "Other"]];
   let db = null, items = [];
   // Six tabs no longer fit a phone: let the tab row scroll sideways instead of widening the page.
@@ -42,7 +42,7 @@
         <span class="notice">${when(t.at || t.created_at)}</span></h3>
       <span><b>${h(t.title || "")}</b></span>
       ${t.detail ? `<span class="notice" style="white-space:pre-wrap">${h(t.detail)}</span>` : ""}
-      <div class="actions">${tel ? `<a class="btn ghost" href="sms:${h(tel)}">Text</a><a class="btn ghost" href="tel:${h(tel)}">Call</a>` : ""}
+      <div class="actions">${/^https:\/\//.test(t.link || "") ? `<a class="btn ghost" href="${h(t.link)}" target="_blank" rel="noopener">Open email</a>` : ""}${tel ? `<a class="btn ghost" href="sms:${h(tel)}">Text</a><a class="btn ghost" href="tel:${h(tel)}">Call</a>` : ""}
         ${t.status === "done" ? `<span class="notice">Done ${when(t.done_at)}</span><button class="btn" data-undo type="button">Not done</button>`
           : `<button class="btn primary" data-done type="button">Done</button>`}</div></section>`;
   }
