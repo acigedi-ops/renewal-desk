@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 7;
+const VERSION = 8;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -193,6 +193,14 @@ const fill = (tpl, c, k) => String(tpl).split("{name}").join(String(c.name || ""
 const FOLLOWUP_DEFAULT = "Нагадую: чекаю на ваш дохід за {quarter}, щоб вчасно подати податки. Дякую!";
 
 // ---------- 1. Replies -> "Got income" ----------
+// A reply that means "stop texting me", in English, Ukrainian or Russian: a single stop word on its own ("STOP", "Стоп!"),
+// or a short message starting with a stop phrase ("не пишіть мені більше"). "Stop by tomorrow" is not one.
+const STOP_WORDS = ["stop", "stop texting", "stop texting me", "unsubscribe", "stop all", "стоп", "не пишіть", "не пишіть мені", "більше не пишіть",
+  "не пиши", "не пишите", "не пишите мне", "больше не пишите", "відписатися", "отписаться", "не турбуйте", "не беспокойте"];
+function isStop(text){
+  const t = String(text || "").toLowerCase().replace(/[^a-zа-яіїєґё' ]+/g, " ").replace(/\s+/g, " ").trim();
+  return t.length > 0 && t.length <= 40 && STOP_WORDS.some(w => t === w || (w.includes(" ") && t.startsWith(w + " ")));
+}
 function scanReplies(clients){
   const st = readJson(STATE, {});
   if (st.cursor == null){
@@ -210,6 +218,15 @@ function scanReplies(clients){
     const at = new Date(r.ms).toISOString(), text = (bodyText(r) || (r.att ? "[photo or file]" : "")).slice(0, 500);
     const p = patches[c.id] = patches[c.id] || {};
     p.last_reply = {text, at};
+    // "STOP" (or Ukrainian / Russian "don't text me"): never text them again, and tell Eduard. Not an income reply.
+    if (isStop(text) && !c.do_not_text){
+      Object.assign(p, {do_not_text: true, do_not_text_at: at, do_not_text_reason: `Replied "${text.slice(0, 60)}"`});
+      c.do_not_text = true;
+      setDoc("tasks", "stop-" + last10(c.phone), {source: "text", who: c.name || "", phone: c.phone, client_id: c.id, category: "qtax", urgent: true,
+        title: "Asked you to stop texting", detail: `They replied "${text.slice(0, 120)}". Quarter texts to them are now off (Qtax shows "Do not text").`,
+        at, status: "open", done_at: "", created_at: nowIso(), created_by: "mac"});
+      continue;
+    }
     // Any quarter they were asked about before this message counts as answered.
     Object.keys(c).filter(k => /^q_\d{4}Q\d$/.test(k)).forEach(k => {
       const q = Object.assign({}, c[k], p[k]);
@@ -275,6 +292,7 @@ function sendApproved(readable){
     const c = t.client_id && getDoc("qtax", t.client_id);
     const k = qKey(t.quarter || filingQuarter()), q = (c && c[k]) || {};
     if (!c || c.active === false){ done({status: "skipped", error: "Not an active Qtax client"}); continue; }
+    if (c.do_not_text){ done({status: "skipped", error: "On your do-not-text list"}); continue; }
     if (t.kind === "followup" && q.status !== "asked"){ done({status: "skipped", error: "Already answered"}); continue; }
     if (t.kind === "ask" && q.status){ done({status: "skipped", error: q.status === "asked" ? "Already asked this quarter" : "Already answered"}); continue; }
     // Send only to the number Eduard approved (t.phone). If the client's number changed since, don't guess: back to draft for a new OK.
@@ -330,7 +348,7 @@ function draftReminders(){
   const cutoff = new Date(Date.now() - FOLLOWUP_DAYS * 864e5).toISOString();
   for (const c of clients){
     const q = c[key];
-    if (c.active === false || !q || q.status !== "asked" || (q.followups || 0) >= MAX_FOLLOWUPS) continue;
+    if (c.active === false || c.do_not_text || !q || q.status !== "asked" || (q.followups || 0) >= MAX_FOLLOWUPS) continue;
     if ((q.last_followup_at || q.asked_at || "") > cutoff) continue;
     // One reminder at a time; one Eduard dismissed or sent keeps the next away for a few days.
     if (texts.some(t => t.client_id === c.id && (["draft", "approved", "sending", "unsure"].includes(t.status) || t.created_at > cutoff))) continue;
