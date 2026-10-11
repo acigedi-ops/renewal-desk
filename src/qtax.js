@@ -103,6 +103,7 @@
     while (quarters.length < 5) quarters.push(prevQuarter(quarters.at(-1)));
     const qs = [...new Set(quarters)];
     const search = (q("#qq")?.value || "").trim().toLowerCase();
+    const removedOpen = !!q("#qRemoved")?.open;
     const shown = clients.filter(c => !filter || (filter === "none" ? !st(c) && c.active !== false : filter === "done" ? ["filed", "paid"].includes(st(c)) : st(c) === filter))
       .filter(c => !search || String(c.name || "").toLowerCase().includes(search) || (digits(search) && digits(c.phone).includes(digits(search))))
       .sort((a, b) => (a.active === false) - (b.active === false) || String(a.name).localeCompare(String(b.name)));
@@ -122,6 +123,7 @@
   ${adding ? addForm() : ""}
   ${discoveryCard()}
   ${silentCard(active)}
+  ${removedCard(removedOpen)}
   ${draftCards(active)}
   ${progressCard()}
   <div class="section-h"><h2>Client list · ${qLabel(quarter)}</h2><span class="notice">${active.length} get the quarter text${clients.length > active.length ? ` · ${clients.length - active.length} removed` : ""}</span></div>
@@ -170,6 +172,17 @@
       <div class="list">${list.map(c => { const p = silentOf(c); return `<div class="qrow" data-qc="${h(c.id)}"><div><span class="name">${h(c.name || phoneFmt(c.phone))}</span>
         <div class="meta">${h(phoneFmt(c.phone))} · no reply to ${p.sent} texts · ${p.last_in ? `last texted you ${day(p.last_in)} ${new Date(p.last_in).getFullYear()}` : "never texted you"}</div></div>
         <div class="acts"><button class="btn ghost" data-qremove type="button">Remove</button></div></div>`; }).join("")}</div></section>`;
+  }
+
+  // Removed in the last 7 days, so a wrong tap is easy to undo. Older removals stay at the bottom of the client list.
+  function removedCard(removedOpen){
+    const week = new Date(Date.now() - 7 * 864e5).toISOString();
+    const list = clients.filter(c => c.active === false && c.removed_at > week).sort((a, b) => b.removed_at.localeCompare(a.removed_at));
+    if (!list.length) return "";
+    return `<details class="card" id="qRemoved" ${removedOpen ? "open" : ""}><summary><b>Recently removed</b> <span class="chip plain">${list.length}</span> <span class="notice">last 7 days, tap to see</span></summary>
+      <div class="list">${list.map(c => `<div class="qrow off" data-qc="${h(c.id)}"><div><span class="name">${h(c.name || phoneFmt(c.phone))}</span>
+        <div class="meta">${h(phoneFmt(c.phone))} · removed ${day(c.removed_at)}${c.removed_reason ? ` · ${h(c.removed_reason)}` : ""}</div></div>
+        <div class="acts"><button class="btn ghost" data-qactive type="button">Add back</button></div></div>`).join("")}</div></details>`;
   }
 
   function draftCards(active){
@@ -267,7 +280,7 @@
         if (!confirm(`Remove ${list.length} people who never answered from your Qtax list? You can add any of them back later.`)) return;
         t.disabled = true;
         await inChunks(texts.filter(x => x.status === "draft" && list.some(c => c.id === x.client_id)), x => db.doc("texts/" + x.id).update({status: "dismissed", dismissed_at: new Date().toISOString()}));
-        return inChunks(list, c => db.doc("qtax/" + c.id).update({active: false, removed_reason: "never answered"}));
+        return inChunks(list, c => db.doc("qtax/" + c.id).update({active: false, removed_reason: "never answered", removed_at: new Date().toISOString()}));
       }
       const drop = t.closest("[data-qdrop]"); if (drop) return db.doc("texts/" + drop.dataset.qdrop).update({status: "dismissed", dismissed_at: new Date().toISOString()});
       const discard = t.closest("[data-qdiscard]"); if (discard){
@@ -295,7 +308,7 @@
       const c = clients.find(x => x.id === rowEl.dataset.qc);
       if (t.closest("[data-qedit]")){ editing = c.id; return render(); }
       if (t.closest("[data-qcancel]")){ editing = null; return render(); }
-      if (t.closest("[data-qactive]")){ await db.doc("qtax/" + c.id).update({active: c.active === false}); editing = null; return render(); }
+      if (t.closest("[data-qactive]")){ await db.doc("qtax/" + c.id).update(c.active === false ? {active: true, removed_at: "", removed_reason: ""} : {active: false, removed_at: new Date().toISOString()}); editing = null; return render(); }
       if (t.closest("[data-qsave]")){
         const f = Object.fromEntries([...rowEl.querySelectorAll("[data-qe]")].map(i => [i.dataset.qe, i.value.trim()]));
         if (!e164(f.phone)) return alert("Add a phone number.");
@@ -305,7 +318,7 @@
         if (!confirm(`Remove ${c.name || phoneFmt(c.phone)} from your Qtax list? They won't get quarter texts. You can add them back later.`)) return;
         // Their unsent drafts go too, so they can't be approved by accident.
         await inChunks(texts.filter(x => x.client_id === c.id && x.status === "draft"), x => db.doc("texts/" + x.id).update({status: "dismissed", dismissed_at: new Date().toISOString()}));
-        return db.doc("qtax/" + c.id).update({active: false});
+        return db.doc("qtax/" + c.id).update({active: false, removed_at: new Date().toISOString()});
       }
       if (t.closest("[data-qremind]")){ t.disabled = true; return draft(c, "followup"); }
     } catch (err){ alert("Something went wrong: " + (err?.message || err)); }
