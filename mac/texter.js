@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 12;
+const VERSION = 13;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -521,6 +521,14 @@ function contacts(){
   }
   return names;
 }
+// Clients saved with no name (their contact wasn't on this Mac yet, e.g. it lived only in Gmail on the iPhone) get the
+// name from Contacts once it syncs. Only blank names are filled; a name Eduard typed or kept is never changed.
+function fillNames(clients){
+  const blank = clients.filter(c => !String(c.name || "").trim() && last10(c.phone).length === 10);
+  if (!blank.length) return;
+  const names = contacts();
+  blank.forEach(c => { const n = names[last10(c.phone)]; if (n){ mergeDoc("qtax", c.id, {name: n, name_from: "contacts"}); log(`named ${c.id}`); } });
+}
 function discover(){
   const since = Date.now() - 400 * 864e5;
   const hours = chat(`SELECT ${MS} / 3600000 AS hr FROM message m WHERE m.is_from_me = 1 AND m.associated_message_type = 0 AND ${MS} >= ${since}
@@ -736,6 +744,10 @@ function tick(){
       const d = getDoc("qtaxmeta", "discovery");
       const st = readJson(STATE, {});
       checkCallbacks();
+      if (Date.now() - (readJson(STATE, {}).names_at || 0) > 3600e3){
+        try { fillNames(listDocs("qtax")); } catch (e){ log("names: " + e.message); }
+        writeJson(STATE, Object.assign(readJson(STATE, {}), {names_at: Date.now()}));
+      }
       if (Date.now() - (readJson(STATE, {}).missed_at || 0) > 10 * 60000){
         try { missedCalls(); } catch (e){ log("missed calls: " + e.message); }
         writeJson(STATE, Object.assign(readJson(STATE, {}), {missed_at: Date.now()}));
