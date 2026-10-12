@@ -98,6 +98,9 @@
   }
   async function inChunks(list, fn){ for (let i = 0; i < list.length; i += 10) await Promise.all(list.slice(i, i + 10).map(fn)); }
 
+  // A client's Send takes two taps: the first turns the button into "Confirm" for a few seconds (Eduard asked, 2026-10-12).
+  let arming = null, armTimer = 0;
+
   // ---- Render ----
   function render(force){
     if (root.hidden || !db) return;
@@ -244,7 +247,7 @@
         <div class="meta">${h(phoneFmt(t.phone))}</div>
         <details><summary class="notice" style="cursor:pointer">See text</summary><div class="qmsg">${h(t.body)}</div></details></div>
       <div class="acts"><button class="btn ghost" data-qdrop="${h(t.id)}" type="button" aria-label="Don't text ${h(t.name)}">Don't text</button>
-        <button class="btn primary" data-qapprove="one" data-qids="${h(t.id)}" type="button">Send</button></div></div>`;
+        <button class="btn primary" data-qapprove="one" data-qids="${h(t.id)}" type="button">${arming === t.id ? "Confirm" : "Send"}</button></div></div>`;
     return `<details class="card" id="qDrafts" ${open ? "open" : ""}><summary style="cursor:pointer"><b>Drafts</b> <span class="chip info">${all.length}</span>
         <span class="notice">${qLabel(quarter)} · each client gets their own separate text</span></summary>
       ${tpl("ask_template").includes("{quarter}") ? "" : `<span class="notice">This is your own wording from last time. Check the months and dates before you send.</span>`}
@@ -358,7 +361,14 @@
         const list = onCard(approve);
         if (!list.length) return;
         const live = Date.now() - new Date(mac?.seen_at || 0) < 5 * 60000;
-        // One client's Send goes with one tap (Eduard asked, 2026-10-12); Send all still asks first.
+        if (approve.dataset.qapprove === "one" && arming !== list[0].id){
+          arming = list[0].id; clearTimeout(armTimer);
+          root.querySelectorAll('[data-qapprove="one"]').forEach(b => { b.textContent = b === approve ? "Confirm" : "Send"; });
+          armTimer = setTimeout(() => { arming = null; render(); }, 5000);
+          return;
+        }
+        if (approve.dataset.qapprove === "one"){ arming = null; clearTimeout(armTimer); }
+        // Send all still asks in a pop-up first.
         if (approve.dataset.qapprove !== "one" && !confirm((list.length === 1 ? `Send this text to ${list[0].name || phoneFmt(list[0].phone)} from your phone number?\n\n"${list[0].body}"\n\n`
           : `Send ${list.length} separate ${qLabel(quarter)} texts from your phone number, one to each of the ${list.length} people in Drafts? Nobody sees who else got it.\n\n"${list[0].body}"\n\n`) +
           (live ? "Your Mac sends them one by one." : "Your Mac is offline: they go out when it's back on (within 2 days, or they come back here for a new OK).") )) return;
