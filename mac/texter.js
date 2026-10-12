@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 11;
+const VERSION = 12;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -227,8 +227,8 @@ function readIncome(text){
        .replace(/(^|[^\d$.,])(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}\.\d{1,2}\.\d{2,4})(?![\d.,])/g, "$1 ")          // dates 10/15, 15.10.2026
        .replace(new RegExp(`(^|[^${L}])(?:q|кв)\\s*-?\\s*[1-4](?!\\d)`, "g"), "$1 ")                                    // Q3, кв 3
        .replace(new RegExp(`(^|\\D)[1-4]\\s*-?\\s*(?:й|ий|ій|th|rd|nd|st)?\\s*(?:квартал|quarter|кв)`, "g"), "$1 ")      // 3 квартал
-       .replace(/(^|[^\d$,.])(1040|1099|1065|1120)(?![\d,.])(?!\s*(?:\$|dollar|долар|доллар))/g, "$1 ")                    // tax form numbers
-       .replace(new RegExp(`(^|[^\\d$,.])20[2-3]\\d(?![\\d,.])(?!\\s*(?:\\$|k(?![${L}])|к(?![${L}])|тис|тыс|dollar|долар|доллар))`, "g"), "$1 "); // years
+       .replace(/(^|[^\d$,.])(1040|1099|1065|1120)(?![\d,]|\.\d)(?!\s*(?:\$|dollar|долар|доллар))/g, "$1 ")                    // tax form numbers
+       .replace(new RegExp(`(^|[^\\d$,.])20[2-3]\\d(?![\\d,]|\\.\\d)(?!\\s*(?:\\$|k(?![${L}])|к(?![${L}])|тис|тыс|dollar|долар|доллар))`, "g"), "$1 "); // years
   const amounts = [];
   const re = /(\$\s*)?(\d{1,3}(?:[ ,. ]\d{3})+|\d+)(?:[.,](\d{1,2}))?(?!\d)\s*(k(?![a-zа-яіїєґё])|к(?![a-zа-яіїєґё])|тис|тыс|thousand)?/g;
   let m;
@@ -243,16 +243,27 @@ function readIncome(text){
   if (ZERO_RE.test(words) || /^(дохід|доход|income)\s*(0|нуль|zero|none|немає|нет)$/.test(words)) return {amount: 0};
   return {why: "no number in the reply"};
 }
+// "First quarter 29,699 / second 17,909 / third 29,603": when they list several quarters, take the line for this one.
+const Q_WORDS = {1: /перш|перв|first|1st|\b1\s*-?\s*(й|ий|ій)?\s*(кв|quarter)|q\s*1\b/i, 2: /друг|втор|second|2nd|\b2\s*-?\s*(й|ий|ій)?\s*(кв|quarter)|q\s*2\b/i,
+  3: /трет|third|3rd|\b3\s*-?\s*(й|ий|ій)?\s*(кв|quarter)|q\s*3\b/i, 4: /четв|fourth|4th|\b4\s*-?\s*(й|ий|ій)?\s*(кв|quarter)|q\s*4\b/i};
+function readIncomeFor(text, quarter){
+  const r = readIncome(text);
+  if (r.why !== "wrote more than one number" || !quarter) return r;
+  const lines = String(text).split("\n").filter(l => Q_WORDS[+quarter.slice(-1)].test(l));
+  const one = lines.length === 1 && readIncome(lines[0]);
+  return one && one.amount !== undefined ? {amount: one.amount} : r;
+}
 // ---- readIncome (end) ----
 // ---- Income sent before Eduard asked ----
 // A client who texts their numbers for the quarter on their own (after it ends, before the quarter text goes out) gets
 // that income on the card like any reply, marked reported_early, and the site leaves them out of "Draft texts".
-// A message counts when it holds one amount of $100 or more, or mentions income / tax / the quarter / a month with a number.
+// A message counts when it holds one amount of $100 or more, or mentions income / tax / the quarter / a month with an amount.
 const INCOME_WORDS = /дох[іо]д|income|зароб|earn|квартал|quarter|\btax|подат|налог|\b(jan|feb|march|apr|june?|july?|aug|sept?|oct|nov|dec)|січ|лют|берез|квіт|черв|лип|серп|верес|жовт|листоп|груд|январ|феврал|апрел|июн|июл|август|сентябр|октябр|ноябр|декабр/i;
 function incomeish(text){
   if (!text || text === "[photo or file]") return false;
   const r = readIncome(text);
-  return (r.amount !== undefined && r.amount >= 100) || (INCOME_WORDS.test(text) && /\d/.test(text));
+  // Keywords count only with a real number left after dates, years and form numbers are set aside ("tax return for 2025" doesn't).
+  return (r.amount !== undefined && r.amount >= 100) || (INCOME_WORDS.test(text) && (r.amount !== undefined || r.why === "wrote more than one number"));
 }
 function quarterEndMs(k){ return new Date(+k.slice(0, 4), +k.slice(-1) * 3, 1).getTime(); } // first day after the quarter, local time
 function noteEarly(early, c, r, text, at){
@@ -274,7 +285,7 @@ function saveEarly(early, clients, pics){
       const prev = old.reported_early ? String(old.reported_text || "").split("\n").filter(Boolean) : [];
       const lines = prev.concat(e.texts.filter(t => !prev.includes(t)));
       if (lines.length === prev.length && old.reported_status) continue;
-      const text = lines.join("\n").slice(-500), r = readIncome(text);
+      const text = lines.join("\n").slice(-500), r = readIncomeFor(text, e.quarter);
       mergeDoc("qtaxq", docId, {client_id: id, name: c.name || "", quarter: e.quarter, reported_early: true, reported_text: text, reported_at: old.reported_at || e.at,
         reported_income: r.amount === undefined ? "" : r.amount, reported_status: r.amount === undefined ? "unclear" : "unconfirmed", reported_why: r.why || ""});
       log(`income sent early by ${id}`);
@@ -338,7 +349,7 @@ function scanReplies(clients){
     try {
       const quarter = k.slice(2, 6) + "-" + k.slice(6), docId = id + "_" + quarter, old = getDoc("qtaxq", docId) || {}, qd = patches[id][k];
       if (old.reported_status === "confirmed" || old.reported_text === qd.reply) return;
-      const r = readIncome(qd.reply), c = clients.find(x => x.id === id) || {};
+      const r = readIncomeFor(qd.reply, quarter), c = clients.find(x => x.id === id) || {};
       mergeDoc("qtaxq", docId, {client_id: id, name: c.name || "", quarter, reported_income: r.amount === undefined ? "" : r.amount,
         reported_status: r.amount === undefined ? "unclear" : "unconfirmed", reported_why: r.why || "", reported_text: qd.reply, reported_at: qd.received_at || nowIso()});
     } catch (e){ log(`income read failed for ${id}: ${e}`); }
