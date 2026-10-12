@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 13;
+const VERSION = 14;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -508,6 +508,30 @@ function draftReminders(){
   }
 }
 
+// On the first day of each quarter: a draft quarter text for every client, one per person (never a group). Only drafts:
+// nothing goes out until Eduard taps Send or Send all. Skips anyone removed, on the do-not-text list, already asked or
+// answered this quarter, already holding a quarter text, or whose income for the quarter is already in.
+function draftQuarter(){
+  const k = filingQuarter(), key = qKey(k), st = readJson(STATE, {});
+  if (st.drafted_q === k) return;
+  const settings = getDoc("qtaxmeta", "settings") || {};
+  if (!settings.ask_template) return;
+  const clients = listDocs("qtax"), texts = listDocs("texts", `&data->>quarter=eq.${k}&data->>kind=eq.ask`), have = {};
+  listDocs("qtaxq", `&data->>quarter=eq.${k}`).forEach(a => {
+    if (["unconfirmed", "confirmed"].indexOf(a.reported_status) >= 0 || (a.income !== undefined && a.income !== "")) have[a.client_id] = true;
+  });
+  let n = 0;
+  for (const c of clients){
+    if (c.active === false || c.do_not_text || (c[key] && c[key].status) || have[c.id] || !/^\+1\d{10}$/.test(c.phone || "")) continue;
+    if (texts.some(t => t.client_id === c.id && t.status !== "dismissed")) continue;
+    setDoc("texts", `ask-${k}-${c.id}`, {client_id: c.id, name: c.name || "", phone: c.phone, kind: "ask", quarter: k,
+      body: fill(settings.ask_template, c, k), status: "draft", created_at: nowIso(), created_by: "mac"});
+    n++;
+  }
+  writeJson(STATE, Object.assign(readJson(STATE, {}), {drafted_q: k}));
+  log(`drafted ${n} quarter texts for ${k}`);
+}
+
 // ---------- 4. Find past group texts (the Hit Em Up blast) so Eduard doesn't have to type his list ----------
 function contacts(){
   const names = {};
@@ -740,6 +764,7 @@ function tick(){
     if (readable) scanReplies(listDocs("qtax"));
     sendApproved(readable);
     draftReminders();
+    if (readable) try { draftQuarter(); } catch (e){ log("quarter drafts: " + e.message); }
     if (readable){
       const d = getDoc("qtaxmeta", "discovery");
       const st = readJson(STATE, {});
