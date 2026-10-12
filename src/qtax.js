@@ -358,7 +358,8 @@
         const list = onCard(approve);
         if (!list.length) return;
         const live = Date.now() - new Date(mac?.seen_at || 0) < 5 * 60000;
-        if (!confirm((list.length === 1 ? `Send this text to ${list[0].name || phoneFmt(list[0].phone)} from your phone number?\n\n"${list[0].body}"\n\n`
+        // One client's Send goes with one tap (Eduard asked, 2026-10-12); Send all still asks first.
+        if (approve.dataset.qapprove !== "one" && !confirm((list.length === 1 ? `Send this text to ${list[0].name || phoneFmt(list[0].phone)} from your phone number?\n\n"${list[0].body}"\n\n`
           : `Send ${list.length} separate ${qLabel(quarter)} texts from your phone number, one to each of the ${list.length} people in Drafts? Nobody sees who else got it.\n\n"${list[0].body}"\n\n`) +
           (live ? "Your Mac sends them one by one." : "Your Mac is offline: they go out when it's back on (within 2 days, or they come back here for a new OK).") )) return;
         approve.disabled = true;
