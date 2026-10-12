@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 10;
+const VERSION = 11;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -227,6 +227,7 @@ function readIncome(text){
        .replace(/(^|[^\d$.,])(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}\.\d{1,2}\.\d{2,4})(?![\d.,])/g, "$1 ")          // dates 10/15, 15.10.2026
        .replace(new RegExp(`(^|[^${L}])(?:q|кв)\\s*-?\\s*[1-4](?!\\d)`, "g"), "$1 ")                                    // Q3, кв 3
        .replace(new RegExp(`(^|\\D)[1-4]\\s*-?\\s*(?:й|ий|ій|th|rd|nd|st)?\\s*(?:квартал|quarter|кв)`, "g"), "$1 ")      // 3 квартал
+       .replace(/(^|[^\d$,.])(1040|1099|1065|1120)(?![\d,.])(?!\s*(?:\$|dollar|долар|доллар))/g, "$1 ")                    // tax form numbers
        .replace(new RegExp(`(^|[^\\d$,.])20[2-3]\\d(?![\\d,.])(?!\\s*(?:\\$|k(?![${L}])|к(?![${L}])|тис|тыс|dollar|долар|доллар))`, "g"), "$1 "); // years
   const amounts = [];
   const re = /(\$\s*)?(\d{1,3}(?:[ ,. ]\d{3})+|\d+)(?:[.,](\d{1,2}))?(?!\d)\s*(k(?![a-zа-яіїєґё])|к(?![a-zа-яіїєґё])|тис|тыс|thousand)?/g;
@@ -243,6 +244,43 @@ function readIncome(text){
   return {why: "no number in the reply"};
 }
 // ---- readIncome (end) ----
+// ---- Income sent before Eduard asked ----
+// A client who texts their numbers for the quarter on their own (after it ends, before the quarter text goes out) gets
+// that income on the card like any reply, marked reported_early, and the site leaves them out of "Draft texts".
+// A message counts when it holds one amount of $100 or more, or mentions income / tax / the quarter / a month with a number.
+const INCOME_WORDS = /дох[іо]д|income|зароб|earn|квартал|quarter|\btax|подат|налог|\b(jan|feb|march|apr|june?|july?|aug|sept?|oct|nov|dec)|січ|лют|берез|квіт|черв|лип|серп|верес|жовт|листоп|груд|январ|феврал|апрел|июн|июл|август|сентябр|октябр|ноябр|декабр/i;
+function incomeish(text){
+  if (!text || text === "[photo or file]") return false;
+  const r = readIncome(text);
+  return (r.amount !== undefined && r.amount >= 100) || (INCOME_WORDS.test(text) && /\d/.test(text));
+}
+function quarterEndMs(k){ return new Date(+k.slice(0, 4), +k.slice(-1) * 3, 1).getTime(); } // first day after the quarter, local time
+function noteEarly(early, c, r, text, at){
+  const fq = filingQuarter(), k = qKey(fq);
+  if (c.active === false || (c[k] && c[k].status) || r.ms < quarterEndMs(fq)) return;
+  const e = early[c.id] = early[c.id] || {k, quarter: fq, texts: [], at: "", photos: []};
+  if (incomeish(text)){ if (!e.texts.includes(text)) e.texts.push(text); e.at = e.at || at; }
+  if (r.att) e.photos.push({id: r.id, ms: r.ms});
+}
+function saveEarly(early, clients, pics){
+  for (const id in early){
+    const e = early[id]; if (!e.texts.length) continue;
+    try {
+      const docId = id + "_" + e.quarter, old = getDoc("qtaxq", docId) || {}, c = clients.find(x => x.id === id) || {};
+      // Photos sent within a day of the income text (a statement screenshot) go with it.
+      const near = e.photos.filter(ph => Math.abs(ph.ms - Date.parse(e.at)) < 864e5 || e.texts.length && ph.ms >= Date.parse(e.at));
+      if (near.length) pics[id + "|" + e.k] = (pics[id + "|" + e.k] || []).concat(near.map(ph => ph.id));
+      if (old.reported_status === "confirmed") continue;
+      const prev = old.reported_early ? String(old.reported_text || "").split("\n").filter(Boolean) : [];
+      const lines = prev.concat(e.texts.filter(t => !prev.includes(t)));
+      if (lines.length === prev.length && old.reported_status) continue;
+      const text = lines.join("\n").slice(-500), r = readIncome(text);
+      mergeDoc("qtaxq", docId, {client_id: id, name: c.name || "", quarter: e.quarter, reported_early: true, reported_text: text, reported_at: old.reported_at || e.at,
+        reported_income: r.amount === undefined ? "" : r.amount, reported_status: r.amount === undefined ? "unclear" : "unconfirmed", reported_why: r.why || ""});
+      log(`income sent early by ${id}`);
+    } catch (err){ log(`early income failed for ${id}: ${err}`); }
+  }
+}
 function scanReplies(clients){
   const st = readJson(STATE, {});
   if (st.cursor == null){
@@ -254,6 +292,17 @@ function scanReplies(clients){
     WHERE m.is_from_me = 0 AND m.associated_message_type = 0 AND m.ROWID > ${+st.cursor} ORDER BY m.ROWID LIMIT 400`);
   const byPhone = {}; clients.forEach(c => { if (last10(c.phone).length === 10) byPhone[last10(c.phone)] = c; });
   const patches = {}, pics = {};  // pics["<id>|q_2026Q3"] = message ids with photos or files that belong to that quarter's reply
+  const early = {};
+  // Once per quarter, look back at everything clients texted since the quarter ended, for income they sent before being asked.
+  const fq = filingQuarter();
+  if (st.early_q !== fq){
+    chat(`SELECT ${msgCols} FROM message m JOIN handle h ON h.ROWID = m.handle_id WHERE m.is_from_me = 0 AND m.associated_message_type = 0
+      AND ${MS} >= ${quarterEndMs(fq)} AND m.ROWID <= ${+st.cursor} ORDER BY m.ROWID LIMIT 5000`).forEach(r => {
+      const c = byPhone[last10(r.handle)];
+      if (c) noteEarly(early, c, r, (bodyText(r) || (r.att ? "[photo or file]" : "")).slice(0, 500), new Date(r.ms).toISOString());
+    });
+    st.early_q = fq;
+  }
   for (const r of rows){
     st.cursor = Math.max(st.cursor, r.id);
     const c = byPhone[last10(r.handle)]; if (!c) continue;
@@ -269,6 +318,7 @@ function scanReplies(clients){
         at, status: "open", done_at: "", created_at: nowIso(), created_by: "mac"});
       continue;
     }
+    noteEarly(early, c, r, text, at);
     // Any quarter they were asked about before this message counts as answered.
     Object.keys(c).filter(k => /^q_\d{4}Q\d$/.test(k)).forEach(k => {
       const q = Object.assign({}, c[k], p[k]);
@@ -293,6 +343,7 @@ function scanReplies(clients){
         reported_status: r.amount === undefined ? "unclear" : "unconfirmed", reported_why: r.why || "", reported_text: qd.reply, reported_at: qd.received_at || nowIso()});
     } catch (e){ log(`income read failed for ${id}: ${e}`); }
   });
+  saveEarly(early, clients, pics);
   // Screenshots and PDFs they sent with it (statements): copied to the site so Eduard sees them on the income card.
   for (const key in pics){
     try {
