@@ -110,7 +110,7 @@
     while (quarters.length < 5) quarters.push(prevQuarter(quarters.at(-1)));
     const qs = [...new Set(quarters)];
     const search = (q("#qq")?.value || "").trim().toLowerCase();
-    const removedOpen = !!q("#qRemoved")?.open;
+    const removedOpen = !!q("#qRemoved")?.open, draftsOpen = q("#qDrafts") ? q("#qDrafts").open : true;
     const shown = clients.filter(c => !filter || (filter === "none" ? !st(c) && c.active !== false : filter === "done" ? ["filed", "paid"].includes(st(c)) : st(c) === filter))
       .filter(c => !search || String(c.name || "").toLowerCase().includes(search) || (digits(search) && digits(c.phone).includes(digits(search))))
       .sort((a, b) => (a.active === false) - (b.active === false) || String(a.name).localeCompare(String(b.name)));
@@ -128,11 +128,10 @@
     ${macLine()}
   </header>
   ${adding ? addForm() : ""}
-  ${discoveryCard()}
   ${incomeCard()}
   ${removedCard(removedOpen)}
   ${silentCard(active)}
-  ${draftCards(active)}
+  ${draftCards(active, draftsOpen)}
   ${progressCard()}
   <div class="section-h"><h2>Client list · ${qLabel(quarter)}</h2><span class="notice">${active.length} get the quarter text${clients.length > active.length ? ` · ${clients.length - active.length} removed` : ""}</span></div>
   ${clients.length ? `<div class="list">${shown.map(row).join("") || `<div class="empty">No one matches.</div>`}</div>`
@@ -158,16 +157,6 @@
       <div class="actions"><span class="notice" id="qAddMsg"></span><button class="btn" id="qAddCancel" type="button">Cancel</button><button class="btn primary" id="qAddSave" type="button">Add</button></div></section>`;
   }
 
-  function discoveryCard(){
-    const have = new Set(clients.map(c => c.id));
-    const blasts = (discovery?.blasts || []).map(b => ({...b, fresh: b.recipients.filter(r => !have.has(idFor(r.phone)))})).filter(b => b.fresh.length);
-    if (!blasts.length) return discovery?.requested_at && !(discovery.scanned_at > discovery.requested_at) ? `<div class="empty">Your Mac is looking through your texts for last quarter's clients…</div>` : "";
-    return `<div class="section-h"><h2>People you texted before</h2><span class="notice">From your past quarter texts, found by your Mac</span></div>
-      <div class="list">${blasts.slice(0, 3).map((b, i) => `<section class="card"><h3><span>${b.recipients.length} people · ${day(b.at)}</span>
-        <span><button class="btn primary" data-qblast="${i}" type="button">Add these people</button></span></h3>
-        <div class="qmsg">${h(b.text)}</div>
-        <span class="notice">${b.fresh.length} new: ${h(b.fresh.slice(0, 12).map(r => r.name || phoneFmt(r.phone)).join(", "))}${b.fresh.length > 12 ? "…" : ""}. "Add these people" puts them on your client list and keeps your wording. Each person still gets their own separate text.</span></section>`).join("")}</div>`;
-  }
 
   // People who got the past quarter texts and never wrote back within 3 weeks (counted on the Mac, qtaxmeta/responders).
   const silentOf = c => { const p = responders?.people?.[digits(c.phone).slice(-10)]; return p && p.sent >= 2 && !p.replied ? p : null; };
@@ -239,30 +228,35 @@
         <div class="acts"><button class="btn ghost" data-qactive type="button">Add back</button></div></div>`).join("")}</div></details>`;
   }
 
-  function draftCards(active){
+  // Drafts: one text per client, each with its own Send, plus Send all. The Mac drafts the quarter text for every client
+  // on the first day of each quarter; nothing goes out until Eduard taps Send.
+  function draftCards(active, open){
     const drafts = shownDrafts();
-    const asks = drafts.filter(t => t.kind === "ask"), fups = drafts.filter(t => t.kind === "followup");
+    const asks = drafts.filter(t => t.kind === "ask"), fups = drafts.filter(t => t.kind === "followup"), all = asks.concat(fups);
     const notAsked = active.filter(c => !qOf(c).status && !openText(c) && !haveIncome(c));
     const already = active.filter(c => !qOf(c).status && haveIncome(c));
     const waiting = active.filter(c => qOf(c).status === "asked" && !openText(c));
-    const group = (kind, list, title, tkey) => !list.length ? "" : `<section class="card" data-qgroup="${kind}">
-      <h3><span>${title} <span class="chip info">${list.length} separate texts</span></span><span class="notice">${h(list[0].quarter ? qLabel(list[0].quarter) : "")}</span></h3>
-      ${list[0].note ? `<span class="chip amber">${h(list[0].note)}</span>` : ""}
-      ${kind === "ask" && !tpl(tkey).includes("{quarter}") ? `<span class="notice">This is your own wording from last time. Check the months and dates before you approve.</span>` : ""}
-      <div class="qmsg">${h(list[0].body)}</div>
-      <details><summary class="notice">Change the message</summary><form class="form" onsubmit="return false"><label class="full">Message ({name} = first name, {quarter} = the quarter)
-        <textarea rows="4" data-qtpl="${tkey}">${h(tpl(tkey))}</textarea></label></form>
-        <div class="actions"><button class="btn" data-qsavetpl="${tkey}" type="button">Save message</button></div></details>
-      <div class="qwho">${list.map(t => `<span class="chip plain">${h(t.name || phoneFmt(t.phone))}<button type="button" data-qdrop="${h(t.id)}" aria-label="Don't text ${h(t.name)}">×</button></span>`).join("")}</div>
-      <div class="actions"><span class="notice" data-msg>One-on-one: each person gets their own text, never a group chat.</span><button class="btn" data-qdiscard="${kind}" data-qids="${h(list.map(t => t.id).join(","))}" type="button">Discard</button>
-        <button class="btn primary" data-qapprove="${kind}" data-qids="${h(list.map(t => t.id).join(","))}" type="button">Approve &amp; send ${list.length} separate text${list.length > 1 ? "s" : ""}</button></div></section>`;
-    return `<div class="section-h"><h2>Texts waiting for your OK</h2></div>
-      ${group("ask", asks, "Quarter text", "ask_template")}${group("followup", fups, "Reminders", "followup_template")}
-      ${!drafts.length ? `<div class="empty">Nothing waiting.</div>` : ""}
+    const editor = (tkey, label) => `<details><summary class="notice" style="cursor:pointer">Change the ${label}</summary><form class="form" onsubmit="return false"><label class="full">Message ({name} = first name, {quarter} = the quarter)
+        <textarea rows="5" data-qtpl="${tkey}">${h(tpl(tkey))}</textarea></label></form>
+        <div class="actions"><button class="btn" data-qsavetpl="${tkey}" type="button">Save message</button></div></details>`;
+    const one = t => `<div class="qrow" data-qd="${h(t.id)}"><div><span class="name">${h(t.name || phoneFmt(t.phone))}</span>
+        ${t.kind === "followup" ? ` <span class="chip amber">Reminder</span>` : ""}${t.note ? ` <span class="chip amber">${h(t.note)}</span>` : ""}
+        <div class="meta">${h(phoneFmt(t.phone))}</div>
+        <details><summary class="notice" style="cursor:pointer">See text</summary><div class="qmsg">${h(t.body)}</div></details></div>
+      <div class="acts"><button class="btn ghost" data-qdrop="${h(t.id)}" type="button" aria-label="Don't text ${h(t.name)}">Don't text</button>
+        <button class="btn primary" data-qapprove="one" data-qids="${h(t.id)}" type="button">Send</button></div></div>`;
+    return `<details class="card" id="qDrafts" ${open ? "open" : ""}><summary style="cursor:pointer"><b>Drafts</b> <span class="chip info">${all.length}</span>
+        <span class="notice">${qLabel(quarter)} · each client gets their own separate text</span></summary>
+      ${tpl("ask_template").includes("{quarter}") ? "" : `<span class="notice">This is your own wording from last time. Check the months and dates before you send.</span>`}
+      ${editor("ask_template", "quarter text")}${fups.length ? editor("followup_template", "reminder text") : ""}
+      ${all.length ? `<div class="actions"><span class="notice" data-msg>One-on-one: never a group chat.</span>
+          <button class="btn" data-qdiscard="all" data-qids="${h(all.map(t => t.id).join(","))}" type="button">Discard all</button>
+          <button class="btn primary" data-qapprove="all" data-qids="${h(all.map(t => t.id).join(","))}" type="button">Send all ${all.length}</button></div>
+        <div class="list">${all.map(one).join("")}</div>` : `<div class="empty">No drafts. Your Mac drafts the quarter text for every client on the first day of each quarter.</div>`}
       <div class="actions" style="margin-top:8px">
-        ${notAsked.length ? `<button class="btn primary" id="qDraftAll" type="button">Draft ${qLabel(quarter)} text for ${notAsked.length}</button>` : ""}
+        ${notAsked.length ? `<button class="btn" id="qDraftAll" type="button">Draft ${qLabel(quarter)} text for ${notAsked.length} more</button>` : ""}
         ${already.length ? `<span class="notice">${already.length} already sent you their income, so they're left out (see "Income clients texted you").</span>` : ""}
-        ${waiting.length ? `<button class="btn" id="qDraftFup" type="button">Draft reminders for ${waiting.length} not answered</button>` : ""}</div>`;
+        ${waiting.length ? `<button class="btn" id="qDraftFup" type="button">Draft reminders for ${waiting.length} not answered</button>` : ""}</div></details>`;
   }
 
   function progressCard(){
@@ -331,7 +325,6 @@
       if (t.closest("#qAdd")){ adding = !adding; render(); return q("#qPaste")?.focus(); }
       if (t.closest("#qAddCancel")){ adding = false; return render(); }
       if (t.closest("#qAddSave")) return addPasted();
-      const blast = t.closest("[data-qblast]"); if (blast) return useBlast(+blast.dataset.qblast);
       if (t.closest("#qDraftAll")){
         const list = clients.filter(c => textable(c) && !qOf(c).status && !openText(c) && !haveIncome(c));
         t.disabled = true; await inChunks(list, c => draft(c, "ask")); return;
@@ -365,7 +358,8 @@
         const list = onCard(approve);
         if (!list.length) return;
         const live = Date.now() - new Date(mac?.seen_at || 0) < 5 * 60000;
-        if (!confirm(`Send ${list.length} separate ${qLabel(quarter)} text${list.length > 1 ? "s" : ""} from your phone number, one to each of the ${list.length} people shown? Nobody sees who else got it.\n\n"${list[0].body}"\n\n` +
+        if (!confirm((list.length === 1 ? `Send this text to ${list[0].name || phoneFmt(list[0].phone)} from your phone number?\n\n"${list[0].body}"\n\n`
+          : `Send ${list.length} separate ${qLabel(quarter)} texts from your phone number, one to each of the ${list.length} people in Drafts? Nobody sees who else got it.\n\n"${list[0].body}"\n\n`) +
           (live ? "Your Mac sends them one by one." : "Your Mac is offline: they go out when it's back on (within 2 days, or they come back here for a new OK).") )) return;
         approve.disabled = true;
         const {data} = await window.rdSupabase.auth.getSession(), now = new Date().toISOString();
@@ -428,15 +422,6 @@
         : db.doc("qtax/" + id).set({name: r.name || "", phone: e164(r.phone), active: true, added_at: now});
     });
   }
-  async function useBlast(i){
-    const have = new Set(clients.map(c => c.id));
-    const b = (discovery.blasts || []).filter(x => x.recipients.some(r => !have.has(idFor(r.phone))))[i]; if (!b) return;
-    if (!confirm(`Add these ${b.recipients.length} people to your client list and use this wording for the quarterly text?\n\nEach person gets their own separate text. Nobody sees who else got it.`)) return;
-    await addClients(b.recipients);
-    // Their own words, as last sent; the quarter is whatever they wrote, so keep it unless it names one.
-    await db.doc("qtaxmeta/settings").update({ask_template: b.text, ask_template_from: b.at});
-    settings.ask_template = b.text;
-  }
 
   // ---- Start ----
   (async () => {
@@ -450,8 +435,6 @@
       const m = Object.fromEntries(s.docs.map(d => [d.id, d.data()]));
       settings = m.settings || {}; mac = m.mac || null; discovery = m.discovery || null; responders = m.responders || null; render();
     }, () => {});
-    // Ask the Mac to look for last quarter's group text the first time there are no clients.
-    setTimeout(async () => { if (!clients.length && !discovery) await db.doc("qtaxmeta/discovery").update({requested_at: new Date().toISOString()}).catch(() => {}); }, 4000);
     setInterval(() => { if (!root.hidden && !root.contains(document.activeElement)) render(); }, 60000); // keep "checked x min ago" fresh
   })();
 })();
