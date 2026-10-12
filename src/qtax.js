@@ -138,6 +138,7 @@
   ${clients.length ? `<div class="list">${shown.map(row).join("") || `<div class="empty">No one matches.</div>`}</div>`
     : `<div class="empty">No Qtax clients yet. Your Mac looks for the people you texted last quarter and offers them here, or tap <b>+ Clients</b> to paste a list.</div>`}
   <p class="foot">Texts go out from your own number through Messages on your Mac, only after you tap Approve &amp; send, and only between 8 am and 9 pm. Replies mark the client as "Got income" automatically.</p>`;
+    showPics();
   }
 
   function macLine(){
@@ -192,15 +193,40 @@
     const ok = list.filter(a => a.reported_status === "unconfirmed").length;
     return `<section class="card"><h3><span>Income clients texted you <span class="chip info">${list.length} to check</span></span>
         ${ok > 1 ? `<span><button class="btn primary" data-qincall type="button">All ${ok} look right</button></span>` : ""}</h3>
+      ${list.some(a => a.reported_early && a.reported_status === "unconfirmed") ? `<span class="notice"><b>Sent before you asked:</b> they won't get the quarter text. If one isn't really their income, tap "Not income, text them".</span>` : ""}
       <span class="notice">Your Mac read these amounts from their replies. Check each against their words, then tap Looks right. Nothing is filed or saved as their income until you do.</span>
       <div class="list">${list.map(a => { const c = clients.find(x => x.id === a.client_id) || {}, sure = a.reported_status === "unconfirmed";
         return `<div class="qrow" data-qinc="${h(a.id)}"><div><span class="name">${h(c.name || a.name || phoneFmt(c.phone))}</span>
           ${sure ? ` <b style="color:var(--ok)">${usd(a.reported_income)}</b>` : ` <span class="chip amber">Couldn't read an amount: ${h(a.reported_why || "check it")}</span>`}
-          <div class="meta">texted ${day(a.reported_at)}</div><div class="reply">${h(String(a.reported_text || "").slice(0, 300))}</div></div>
+          ${a.reported_early ? ` <span class="chip info">Sent before you asked</span>` : ""}
+          <div class="meta">texted ${day(a.reported_at)}</div>${a.reported_text ? `<div class="reply">${h(String(a.reported_text).slice(0, 300))}</div>` : ""}${pics(a)}</div>
           <div class="acts">${sure ? `<button class="btn primary" data-qincok type="button">Looks right</button><button class="btn ghost" data-qincedit type="button">Change</button>`
-            : `<button class="btn primary" data-qincedit type="button">Enter amount</button><button class="btn ghost" data-qincskip type="button">Not income</button>`}</div></div>`; }).join("")}</div></section>`;
+            : `<button class="btn primary" data-qincedit type="button">Enter amount</button><button class="btn ghost" data-qincskip type="button">Not income</button>`}
+            ${sure && a.reported_early ? `<button class="btn ghost" data-qincskip type="button">Not income, text them</button>` : ""}</div></div>`; }).join("")}</div></section>`;
   }
-  const confirmIncome = (a, n) => db.doc("qtaxq/" + a.id).update({income: n, reported_status: "confirmed", confirmed_at: new Date().toISOString()});
+  // Statement screenshots and PDFs they sent (reported_files, uploaded by the Mac). The bucket is private, so images are
+  // fetched through the signed-link fetch in shim.js and shown from memory; a tap opens the full file.
+  const picUrls = {};
+  const pics = a => !(a.reported_files || []).length ? "" : `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">${a.reported_files.map(f =>
+    f.missing ? `<span class="chip plain">${f.kind === "pdf" ? "PDF" : "Photo"} still downloading to your Mac</span>`
+    : f.kind === "pdf" ? `<a class="btn ghost" href="${h(f.url)}" target="_blank" rel="noopener">📄 ${h(f.name)}</a>`
+    : `<a href="${h(f.url)}" target="_blank" rel="noopener" aria-label="Open photo they sent"><img data-qpic="${h(f.url)}" alt="Photo they sent" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--surface)"></a>`).join("")}</div>`;
+  function showPics(){
+    root.querySelectorAll("img[data-qpic]").forEach(async img => {
+      const u = img.dataset.qpic;
+      try { picUrls[u] = picUrls[u] || URL.createObjectURL(await (await fetch(u)).blob()); img.src = picUrls[u]; } catch (e){ img.alt = "Couldn't load the photo"; }
+    });
+  }
+  // Their income for the quarter shown is already in (sent on their own, or entered by Eduard): no quarter text for them.
+  // An unclear reply doesn't count until Eduard types the amount.
+  const amountOf = c => amounts.find(a => a.id === `${c.id}_${quarter}`);
+  const haveIncome = c => { const a = amountOf(c); return !!a && (["unconfirmed", "confirmed"].includes(a.reported_status) || (a.income !== undefined && a.income !== "")); };
+  async function confirmIncome(a, n){
+    await db.doc("qtaxq/" + a.id).update({income: n, reported_status: "confirmed", confirmed_at: new Date().toISOString()});
+    const c = clients.find(x => x.id === a.client_id), st = c && (c[qKey(a.quarter)] || {});
+    if (c && (!st.status || st.status === "asked"))
+      await db.doc("qtax/" + c.id).update({[qKey(a.quarter)]: {...st, status: "received", received_at: st.received_at || a.reported_at || new Date().toISOString()}});
+  }
 
   // Removed in the last 7 days, so a wrong tap is easy to undo. Older removals stay at the bottom of the client list.
   function removedCard(removedOpen){
@@ -216,7 +242,8 @@
   function draftCards(active){
     const drafts = shownDrafts();
     const asks = drafts.filter(t => t.kind === "ask"), fups = drafts.filter(t => t.kind === "followup");
-    const notAsked = active.filter(c => !qOf(c).status && !openText(c));
+    const notAsked = active.filter(c => !qOf(c).status && !openText(c) && !haveIncome(c));
+    const already = active.filter(c => !qOf(c).status && haveIncome(c));
     const waiting = active.filter(c => qOf(c).status === "asked" && !openText(c));
     const group = (kind, list, title, tkey) => !list.length ? "" : `<section class="card" data-qgroup="${kind}">
       <h3><span>${title} <span class="chip info">${list.length} separate texts</span></span><span class="notice">${h(list[0].quarter ? qLabel(list[0].quarter) : "")}</span></h3>
@@ -234,6 +261,7 @@
       ${!drafts.length ? `<div class="empty">Nothing waiting.</div>` : ""}
       <div class="actions" style="margin-top:8px">
         ${notAsked.length ? `<button class="btn primary" id="qDraftAll" type="button">Draft ${qLabel(quarter)} text for ${notAsked.length}</button>` : ""}
+        ${already.length ? `<span class="notice">${already.length} already sent you their income, so they're left out (see "Income clients texted you").</span>` : ""}
         ${waiting.length ? `<button class="btn" id="qDraftFup" type="button">Draft reminders for ${waiting.length} not answered</button>` : ""}</div>`;
   }
 
@@ -305,7 +333,7 @@
       if (t.closest("#qAddSave")) return addPasted();
       const blast = t.closest("[data-qblast]"); if (blast) return useBlast(+blast.dataset.qblast);
       if (t.closest("#qDraftAll")){
-        const list = clients.filter(c => textable(c) && !qOf(c).status && !openText(c));
+        const list = clients.filter(c => textable(c) && !qOf(c).status && !openText(c) && !haveIncome(c));
         t.disabled = true; await inChunks(list, c => draft(c, "ask")); return;
       }
       if (t.closest("#qDraftFup")){
