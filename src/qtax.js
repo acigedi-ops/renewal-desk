@@ -362,8 +362,9 @@
           : `Send ${list.length} separate ${qLabel(quarter)} texts from your phone number, one to each of the ${list.length} people in Drafts? Nobody sees who else got it.\n\n"${list[0].body}"\n\n`) +
           (live ? "Your Mac sends them one by one." : "Your Mac is offline: they go out when it's back on (within 2 days, or they come back here for a new OK).") )) return;
         approve.disabled = true;
+        // The phone goes along with the approval: the database checks the approval has exactly one number before it merges.
         const {data} = await window.rdSupabase.auth.getSession(), now = new Date().toISOString();
-        await inChunks(list, x => db.doc("texts/" + x.id).update({status: "approved", approved_at: now, approved_by: data.session?.user?.email || "", note: ""}));
+        await inChunks(list, x => db.doc("texts/" + x.id).update({phone: x.phone, status: "approved", approved_at: now, approved_by: data.session?.user?.email || "", note: ""}));
         return;
       }
       const sure = t.closest("[data-qwent]"); if (sure){
@@ -378,7 +379,7 @@
       const retry = t.closest("[data-qretry]"); if (retry){
         const x = texts.find(i => i.id === retry.dataset.qretry);
         if (!confirm(`Send this text to ${x.name || x.phone} again?`)) return;
-        return db.doc("texts/" + x.id).update({status: "approved", approved_at: new Date().toISOString(), error: ""});
+        return db.doc("texts/" + x.id).update({phone: x.phone, status: "approved", approved_at: new Date().toISOString(), error: ""});
       }
       const rowEl = t.closest("[data-qc]"); if (!rowEl) return;
       const c = clients.find(x => x.id === rowEl.dataset.qc);
