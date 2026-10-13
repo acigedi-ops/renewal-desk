@@ -1,8 +1,8 @@
 // Invoices: QuickBooks invoices that haven't been paid yet, each with a Copy link button.
 // An "Invoices" tab after To do. Kept out of src/app.html, which the L&I routine overwrites; build.mjs loads this after the app.
 // The site can't reach QuickBooks: a Claude session with the QuickBooks connector copies invoices in with tools/invoices_sync.py.
-// Data: collection `invoices/<txn id>` {number, customer, amount, balance, due, date, description, link, status: "unpaid"|"paid", paid_at, synced_at}.
-// Nothing here sends anything to a client; the link opens the invoice in Eduard's QuickBooks.
+// Data: collection `invoices/<txn id>` {number, customer, amount, balance, due, date, description, link, share_link, status: "unpaid"|"paid", paid_at, synced_at}.
+// Copy link copies share_link (the client's view-and-pay page) for Eduard to paste himself; Open in QuickBooks uses link. Nothing here sends anything.
 (() => {
   const q = s => document.querySelector(s);
   const h = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -37,7 +37,7 @@
       <h3><span>${late ? `<span class="chip red">Overdue</span> ` : ""}${h(v.customer)}</span><b>${money(v.status === "unpaid" ? v.balance : v.amount)}</b></h3>
       <span class="notice">Invoice ${h(v.number)} · ${day(v.date)}${v.status === "unpaid" ? ` · due ${day(v.due)}` : ` · paid`}${v.status === "unpaid" && v.balance < v.amount ? ` · ${money(v.amount)} total` : ""}</span>
       ${v.description ? `<span>${h(v.description)}</span>` : ""}
-      <div class="actions">${/^https:\/\//.test(v.link || "") ? `<button class="btn primary" data-copy type="button">Copy link</button><a class="btn ghost" href="${h(v.link)}" target="_blank" rel="noopener">Open in QuickBooks</a>` : ""}</div></section>`;
+      <div class="actions">${/^https:\/\//.test(v.share_link || "") ? `<button class="btn primary" data-copy type="button">Copy link</button>` : `<span class="notice">No client link saved for this one</span>`}${/^https:\/\//.test(v.link || "") ? `<a class="btn ghost" href="${h(v.link)}" target="_blank" rel="noopener">Open in QuickBooks</a>` : ""}</div></section>`;
   }
   function render(){
     const open = items.filter(v => v.status === "unpaid").sort((a, b) => String(a.due).localeCompare(String(b.due)));
@@ -46,7 +46,7 @@
     if (main.hidden) return;
     const total = open.reduce((s, v) => s + Number(v.balance || 0), 0);
     const synced = items.map(v => v.synced_at || "").sort().pop();
-    main.innerHTML = `<p class="notice" style="margin:12px 0 0">Invoices from QuickBooks that haven't been paid yet, oldest due first. Copy link copies the invoice's QuickBooks link.${synced ? ` Updated ${new Date(synced).toLocaleString("en-US", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}.` : ""}</p>` +
+    main.innerHTML = `<p class="notice" style="margin:12px 0 0">Invoices from QuickBooks that haven't been paid yet, oldest due first. Copy link copies the client's page for the invoice, for you to paste yourself.${synced ? ` Updated ${new Date(synced).toLocaleString("en-US", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"})}.` : ""}</p>` +
       (open.length ? `<div class="section-h"><h2>Not paid</h2><span class="notice">${open.length} · ${money(total)}</span></div><div class="list">${open.map(card).join("")}</div>`
         : `<div class="empty">No unpaid invoices.</div>`) +
       (paid.length ? `<details style="margin-top:18px"><summary class="notice" style="cursor:pointer">Recently paid (${paid.length})</summary><div class="list">${paid.map(card).join("")}</div></details>` : "");
@@ -60,7 +60,7 @@
   main.addEventListener("click", async e => {
     const b = e.target.closest("[data-copy]"); if (!b) return;
     const v = items.find(x => x.id === b.closest("[data-inv]").dataset.inv); if (!v) return;
-    const ok = await copy(v.link);
+    const ok = await copy(v.share_link);
     b.textContent = ok ? "Copied" : "Couldn't copy";
     setTimeout(() => { b.textContent = "Copy link"; }, 2000);
   });

@@ -6,9 +6,11 @@ The website can't reach QuickBooks, so a Claude session with the Intuit QuickBoo
 
   invoices_sync.py RESULT.json          upsert every invoice with a balance; mark ones no longer owed as paid
   invoices_sync.py RESULT.json --dry    print what would change
+  invoices_sync.py --add NEW.json       save invoices just made: a JSON list of qbo_sales_create_invoice results
 
 Doc invoices/<txn id>: {number, customer, customer_id, amount, balance, due, date, description, link, share_link,
-status: "unpaid"|"paid", paid_at, synced_at}. `link` opens the invoice in Eduard's QuickBooks; nothing here sends anything.
+status: "unpaid"|"paid", paid_at, synced_at}. `link` opens the invoice in Eduard's QuickBooks; `share_link` is the client's view-and-pay page,
+which QuickBooks returns only from create_invoice (save it with --add). Nothing here sends anything.
 """
 import json, sys
 from datetime import datetime, timezone
@@ -41,7 +43,21 @@ def doc_of(inv, now):
     }
 
 
+def add(path):
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for r in json.load(open(path)):
+        k = str(r["invoice_id"]).rsplit(":", 1)[-1]
+        d = {"number": r.get("invoice_reference_number") or "", "customer": r.get("customer") or "", "customer_id": "",
+             "amount": num(r.get("invoice_total")), "balance": num(r.get("invoice_total")), "due": r.get("due_date") or "",
+             "date": r.get("transaction_date") or "", "description": r.get("line_items_summary") or "",
+             "link": r.get("link") or "", "share_link": r.get("share_link") or "", "status": "unpaid", "synced_at": now}
+        set_doc("invoices", k, d)
+        print("added", d["number"], d["customer"], d["amount"])
+
+
 def main():
+    if sys.argv[1:2] == ["--add"]:
+        return add(sys.argv[2])
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     dry = "--dry" in sys.argv
     data = json.load(open(args[0]))
@@ -56,6 +72,9 @@ def main():
     known = {d["id"]: d["data"] for d in list_docs("invoices")}
     for k, d in unpaid.items():
         print("unpaid", d["number"], d["customer"], d["balance"])
+        # QuickBooks only returns the client link when an invoice is created; keep the one saved then.
+        if not d["share_link"]:
+            d["share_link"] = known.get(k, {}).get("share_link", "")
         if not dry:
             set_doc("invoices", k, d)
     for k, old in known.items():
