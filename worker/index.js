@@ -2,9 +2,11 @@
 // POST /api/outbox/send {id}: sends outbox/<id> from Eduard's Gmail when he taps "Approve & send".
 // Only a signed-in Supabase user can call it, and it only sends what is already in the outbox table,
 // read with that user's own token, so it can't be used as an open mail relay.
+// POST /api/chat: one step of the Assistant chat (worker/chat.js). It only looks things up; it can't send or change anything.
 import {connect} from "cloudflare:sockets";
 import {buildMime, smtpSend} from "./mail.js";
 import {bodyHtml} from "./signature.js";
+import {chat} from "./chat.js";
 
 const json = (status, body) => new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json", "Cache-Control": "no-store"}});
 
@@ -14,6 +16,11 @@ export default {
     if (url.pathname === "/api/outbox/send"){
       if (request.method !== "POST") return json(405, {error: "POST only"});
       try { return await send(request, env); }
+      catch (e){ return json(500, {error: String(e?.message || e)}); }
+    }
+    if (url.pathname === "/api/chat"){
+      if (request.method !== "POST") return json(405, {error: "POST only"});
+      try { return await chat(request, env, supabase); }
       catch (e){ return json(500, {error: String(e?.message || e)}); }
     }
     if (url.pathname.startsWith("/api/")) return json(404, {error: "not found"});
