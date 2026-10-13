@@ -1,5 +1,5 @@
 // Assistant: a chat box where Eduard types what he needs ("COI for Proper Foundation", "unpaid invoices", "what expires this month")
-// and Claude finds it. The "Ask" button (bottom right) opens it. Answers come with buttons to open the client card, the PDF,
+// and Claude finds it. The round chat button (bottom right) opens it. Answers come with buttons to open the client card, the PDF,
 // or copy an invoice link for Eduard to paste himself.
 // How it works: /api/chat (worker/chat.js) holds the API key and passes the conversation to Claude. When Claude asks to look
 // something up, this file answers from the data the app already has loaded and sends the result back. Every tool here only
@@ -231,19 +231,20 @@
 
   // ---- Screen ----
   document.head.insertAdjacentHTML("beforeend", `<style>
-.rdc-fab{position:fixed;right:max(16px, env(safe-area-inset-right, 0px));bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);z-index:25;display:flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:12px 18px 12px 14px;background:var(--accent);color:var(--accent-ink);font:600 15px/1 var(--body, system-ui);box-shadow:0 6px 20px rgb(0 0 0 / .22);cursor:pointer}
-.rdc-fab[hidden]{display:none}
-.rdc{position:fixed;z-index:30;right:16px;bottom:16px;width:min(440px, calc(100vw - 32px));height:min(680px, calc(100vh - 32px));display:flex;flex-direction:column;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 50px rgb(0 0 0 / .28);overflow:hidden;font-family:var(--body, system-ui)}
-.rdc-h{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--surface)}
+.rd-ai-fab{position:fixed;right:var(--rd-fab-right, 24px);bottom:var(--rd-fab-bottom, 24px);z-index:25;width:56px;height:56px;display:grid;place-items:center;border:0;border-radius:50%;background:var(--brand, var(--accent));color:var(--brand-ink, #0B0B0F);box-shadow:0 8px 24px rgb(0 0 0 / .18);cursor:pointer}
+.rd-ai-fab[hidden]{display:none}
+@media (max-width:600px){.rd-ai-fab{right:var(--rd-fab-right, 16px);bottom:var(--rd-fab-bottom, calc(env(safe-area-inset-bottom, 0px) + 16px))}}
+.rdc{position:fixed;z-index:40;right:24px;bottom:24px;width:min(440px, calc(100vw - 48px));height:min(680px, calc(100vh - 48px));display:flex;flex-direction:column;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow, 0 18px 50px rgb(0 0 0 / .28));overflow:hidden;font-family:var(--body, system-ui)}
+.rdc-h{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--glass, var(--surface));-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px)}
 .rdc-h b{flex:1;font:700 16px var(--display, inherit)}
 .rdc-log{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
 .rdc-m{max-width:88%;padding:9px 12px;border-radius:14px;line-height:1.45;font-size:14.5px;overflow-wrap:anywhere}
 .rdc-m.me{align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px;white-space:pre-wrap}
-.rdc-m.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px}
+.rdc-m{border-radius:18px}.rdc-m.ai{align-self:flex-start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:6px}
 .rdc-m.ai p{margin:0 0 6px}.rdc-m.ai p:last-child{margin:0}.rdc-m.ai ul{margin:4px 0;padding-left:18px}
 .rdc-m.err{border-color:var(--red);color:var(--red)}
 .rdc-cards{display:grid;gap:6px;margin-top:8px}
-.rdc-card{display:grid;gap:6px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--bg)}
+.rdc-card{display:grid;gap:6px;border:1px solid var(--line);border-radius:14px;padding:8px 10px;background:var(--bg)}
 .rdc-card b{font-size:13.5px}.rdc-card span{font-size:12.5px;color:var(--muted)}
 .rdc-card div{display:flex;flex-wrap:wrap;gap:6px}
 .rdc-card .btn{font-size:12.5px;padding:5px 10px;text-decoration:none;color:inherit;cursor:pointer}
@@ -257,11 +258,13 @@
 .rdc-f textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:16px/1.35 var(--body, system-ui);background:var(--bg);color:var(--ink);max-height:120px}
 .rdc-f button{border:0;border-radius:12px;padding:0 16px;background:var(--accent);color:var(--accent-ink);font-weight:700;cursor:pointer}
 .rdc-f button:disabled{opacity:.5}
-@media (max-width:600px){.rdc{inset:0;width:auto;height:auto;border-radius:0;border:0;padding-top:env(safe-area-inset-top, 0px)}}
+@media (max-width:600px){.rdc{inset:auto 0 0 0;width:auto;height:calc(100dvh - env(safe-area-inset-top, 0px) - 12px);border-radius:24px 24px 0 0;border:0;border-top:1px solid var(--line)}}
 </style>`);
 
-  const fab = Object.assign(document.createElement("button"), {type: "button", className: "rdc-fab", title: "Ask the assistant",
-    innerHTML: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/></svg>Ask`});
+  // The round button: placed and coloured by the redesign's --rd-fab-bottom / --brand when those exist (bottom right either way).
+  const fab = Object.assign(document.createElement("button"), {type: "button", className: "rd-ai-fab", title: "Ask the assistant",
+    innerHTML: `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01"/></svg>`});
+  fab.setAttribute("aria-label", "Ask the assistant");
   const box = Object.assign(document.createElement("section"), {className: "rdc", hidden: true});
   box.setAttribute("aria-label", "Assistant");
   box.innerHTML = `<div class="rdc-h"><b>Assistant</b><button class="btn" type="button" data-new>New chat</button><button class="btn" type="button" data-close aria-label="Close">Close</button></div>
