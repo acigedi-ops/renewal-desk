@@ -6,11 +6,11 @@ const app = readFileSync("src/app.html", "utf8");
 const at = app.indexOf("<script");
 if (at < 0) throw new Error("src/app.html has no <script>");
 const head = `<!doctype html>
-<html lang="en"><head>
+<html lang="en" data-theme="light"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#0E6655">
+<meta name="theme-color" content="#F2F2F5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -28,8 +28,9 @@ const boot = `<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.
 const pre = app.slice(0, at), rest = app.slice(at);
 const split = pre.indexOf("</style>") + "</style>".length;
 // The Outbox (src/outbox.js), Qtax mode (src/qtax.js + qtaxplus.js), To do, Invoices, health strip, client timeline, client documents, search and the Assistant chat load after the app's scripts; they live outside app.html because the L&I routine overwrites that file.
-// The phone layout (src/mobile.css, plus src/mobile.js for the hide-on-scroll header) is linked last so it wins over every other stylesheet, including the ones those scripts add.
-const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n<script src="/qtaxplus.js"></script>\n<script src="/tasks.js"></script>\n<script src="/invoices.js"></script>\n<script src="/health.js"></script>\n<script src="/timeline.js"></script>\n<script src="/clientdocs.js"></script>\n<script src="/search.js"></script>\n<script src="/chat.js"></script>\n<script src="/mobile.js"></script>\n<link rel="stylesheet" href="/mobile.css">\n</body></html>\n';
+// The phone layout (src/mobile.css, plus src/mobile.js for the hide-on-scroll header) is linked after them so it wins over every other stylesheet, including the ones those scripts add.
+// The white premium look (src/look.css + src/look.js: bottom tab bar, More sheet, greeting) comes last of all; data-theme="light" keeps it white when the phone is in dark mode.
+const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n<script src="/qtaxplus.js"></script>\n<script src="/tasks.js"></script>\n<script src="/invoices.js"></script>\n<script src="/health.js"></script>\n<script src="/timeline.js"></script>\n<script src="/clientdocs.js"></script>\n<script src="/search.js"></script>\n<script src="/chat.js"></script>\n<script src="/mobile.js"></script>\n<link rel="stylesheet" href="/mobile.css">\n<link rel="stylesheet" href="/look.css">\n<script src="/look.js"></script>\n</body></html>\n';
 
 mkdirSync("dist", {recursive: true});
 cpSync("public", "dist", {recursive: true});
@@ -41,6 +42,7 @@ cpSync("src/health.js", "dist/health.js");
 for (const f of ["invoices.js", "qtaxplus.js", "timeline.js", "clientdocs.js", "search.js", "chat.js"]) cpSync("src/" + f, "dist/" + f);
 cpSync("src/mobile.css", "dist/mobile.css");
 cpSync("src/mobile.js", "dist/mobile.js");
+for (const f of ["look.css", "look.js"]) cpSync("src/" + f, "dist/" + f);
 writeFileSync("dist/index.html", html);
 console.log("built dist/index.html", html.length, "bytes");
 
