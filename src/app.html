@@ -284,8 +284,9 @@ function licReasons(c){
   const add = (g, n, text, ending) => out.push({g, n, text, ending: !!ending});
   if (!c.license || !l.checked_at) return out;
   if (reg.status && reg.status !== "ACTIVE"){
-    const since = days(reg.suspended) ?? days(reg.expires);
-    add("lapsed", since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(reg.suspended || reg.expires) : ""}`);
+    // An expired license lapsed on its expiry date; a suspended one on its suspension date.
+    const at = reg.status === "EXPIRED" ? (reg.expires || reg.suspended) : (reg.suspended || reg.expires), since = days(at);
+    add("lapsed", since == null ? 0 : Math.min(since, 0), `Registration ${reg.status.toLowerCase()}${since != null && since < 0 ? " " + fd(at) : ""}`);
     if (insuredLapsed(c.id)) add("lapsed", null, "Still insured: needs a bond and filing to reinstate");
     return out;
   }
@@ -343,11 +344,17 @@ function renderTodo(){
   const rows = licRows();
   const vis = rows.filter(r => matchQ(q, r.c.name, r.c.license, r.c.ubi, r.c.contact?.name));
   const live = vis.filter(r => !snoozed(r));
-  const lapsed = live.filter(recentLapse).sort((a, b) => b.n - a.n);
-  const old = live.filter(r => r.g === "lapsed" && !recentLapse(r)).sort((a, b) => b.n - a.n);
+  // Suspended and Expired each get their own section with every license in that status, most recent first;
+  // ones that lapsed more than 30 days ago (and aren't still insured) fold away inside the section.
+  const status = r => r.c.lni?.registration?.status;
+  const susp = vis.filter(r => r.g === "lapsed" && status(r) === "SUSPENDED").sort((a, b) => b.n - a.n);
+  const exp = vis.filter(r => r.g === "lapsed" && status(r) !== "SUSPENDED").sort((a, b) => b.n - a.n);
   const cov = live.filter(r => r.g === "cov").sort(byN);
   const reg = live.filter(r => r.g === "reg").sort(byN);
-  const later = vis.filter(snoozed).sort(byN);
+  const later = vis.filter(r => r.g !== "lapsed" && snoozed(r)).sort(byN);
+  const lapsedSec = (title, list, word) => list.length ? secH(title, list.length) +
+    `<div class="list">${list.filter(recentLapse).map(callCard).join("")}</div>` +
+    fold(`${word} more than 30 days ago`, list.filter(r => !recentLapse(r)), callCard) : "";
 
   const open = todos.filter(t => t.state !== "resolved");
   const tvis = open.filter(t => matchQ(q, t.client, t.license, t.correct?.number));
@@ -367,12 +374,12 @@ function renderTodo(){
 
   $("#todo").innerHTML = !clients.length ? `<div class="empty">Your clients will appear here after the first L&amp;I check.</div>` :
     `<p class="notice" style="margin:12px 0 0">Every L&amp;I license that needs something from you so it doesn't get suspended, soonest first. Updated at every L&amp;I check (8:50am, 12:50pm and 5:50pm).</p>` +
-    sec("Suspended or expired: call to reinstate", lapsed, callCard) +
+    lapsedSec("Suspended", susp, "Suspended") +
+    lapsedSec("Expired", exp, "Expired") +
     sec("Will be suspended: insurance or bond ends within 30 days and nothing new is on L&amp;I", cov, callCard) +
     sec("License renewals due in the next 60 days", reg, callCard) +
-    (lapsed.length || cov.length || reg.length ? "" : `<div class="empty">${q ? "No licenses match." : "No license needs anything right now."}</div>`) +
+    (susp.length || exp.length || cov.length || reg.length ? "" : `<div class="empty">${q ? "No licenses match." : "No license needs anything right now."}</div>`) +
     fold("Already contacted", later, callCard) +
-    fold("Lapsed more than 30 days ago", old, callCard) +
     `<div class="section-h" style="margin-top:28px"><h2>L&amp;I shows wrong or missing policy info</h2></div>` +
     `<p class="notice" style="margin:4px 0">Policies where L&amp;I's records don't match your carrier portals and emails (those are the correct version). Rebuilt at every L&amp;I check; an item clears itself once L&amp;I matches.</p>` +
     (wrong || `<div class="empty">${open.length ? "No items match." : "Nothing to fix. Every policy in the app matches what L&amp;I has on file."}</div>`);
