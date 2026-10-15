@@ -43,6 +43,14 @@ def doc_of(inv, now):
     }
 
 
+def client_link(url):
+    # The link create_invoice returns opens a checkout that asks for a full billing address; QuickBooks' own
+    # Copy link adds utm_source=sharelink, which opens the card-and-ZIP checkout instead.
+    if not url or "utm_source=" in url:
+        return url or ""
+    return url + ("&" if "?" in url else "?") + "utm_source=sharelink"
+
+
 def add(path):
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     for r in json.load(open(path)):
@@ -50,7 +58,7 @@ def add(path):
         d = {"number": r.get("invoice_reference_number") or "", "customer": r.get("customer") or "", "customer_id": "",
              "amount": num(r.get("invoice_total")), "balance": num(r.get("invoice_total")), "due": r.get("due_date") or "",
              "date": r.get("transaction_date") or "", "description": r.get("line_items_summary") or "",
-             "link": r.get("link") or "", "share_link": r.get("share_link") or "", "status": "unpaid", "synced_at": now}
+             "link": r.get("link") or "", "share_link": client_link(r.get("share_link")), "status": "unpaid", "synced_at": now}
         set_doc("invoices", k, d)
         print("added", d["number"], d["customer"], d["amount"])
 
