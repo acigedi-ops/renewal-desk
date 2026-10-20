@@ -1,7 +1,7 @@
 // Invoices: QuickBooks invoices that haven't been paid yet, each with a Copy link button.
 // An "Invoices" tab after To do. Kept out of src/app.html, which the L&I routine overwrites; build.mjs loads this after the app.
 // The site can't reach QuickBooks: a Claude session with the QuickBooks connector copies invoices in with tools/invoices_sync.py.
-// Data: collection `invoices/<txn id>` {number, customer, amount, balance, due, date, description, link, share_link, status: "unpaid"|"paid", paid_at, synced_at}.
+// Data: collection `invoices/<txn id>` {number, customer, amount, balance, due, date, description, link, share_link, link_from ("quickbooks_copy" once Eduard pastes his own link), status: "unpaid"|"paid", paid_at, synced_at}.
 // Copy link copies share_link (the client's view-and-pay page) for Eduard to paste himself; Open in QuickBooks uses link. Nothing here sends anything.
 (() => {
   const q = s => document.querySelector(s);
@@ -37,7 +37,8 @@
       <h3><span>${late ? `<span class="chip red">Overdue</span> ` : ""}${h(v.customer)}</span><b>${money(v.status === "unpaid" ? v.balance : v.amount)}</b></h3>
       <span class="notice">Invoice ${h(v.number)} · ${day(v.date)}${v.status === "unpaid" ? ` · due ${day(v.due)}` : ` · paid`}${v.status === "unpaid" && v.balance < v.amount ? ` · ${money(v.amount)} total` : ""}</span>
       ${v.description ? `<span>${h(v.description)}</span>` : ""}
-      <div class="actions">${/^https:\/\//.test(v.share_link || "") ? `<button class="btn primary" data-copy type="button">Copy link</button>` : `<span class="notice">No client link saved for this one</span>`}${/^https:\/\//.test(v.link || "") ? `<a class="btn ghost" href="${h(v.link)}" target="_blank" rel="noopener">Open in QuickBooks</a>` : ""}</div></section>`;
+      <div class="actions">${/^https:\/\//.test(v.share_link || "") ? `<button class="btn primary" data-copy type="button">Copy link</button>` : `<span class="notice">No client link saved for this one</span>`}${/^https:\/\//.test(v.link || "") ? `<a class="btn ghost" href="${h(v.link)}" target="_blank" rel="noopener">Open in QuickBooks</a>` : ""}${v.status === "unpaid" ? `<button class="btn ghost" data-paste type="button">${v.link_from === "quickbooks_copy" ? "Change link" : "Paste QuickBooks link"}</button>` : ""}</div>
+      ${v.status === "unpaid" && v.link_from !== "quickbooks_copy" ? `<span class="notice">This link may ask for a full address. For card and ZIP only, copy the link in QuickBooks and tap Paste QuickBooks link.</span>` : ""}</section>`;
   }
   function render(){
     const open = items.filter(v => v.status === "unpaid").sort((a, b) => String(a.due).localeCompare(String(b.due)));
@@ -57,6 +58,19 @@
     t.style.cssText = "position:fixed;opacity:0"; document.body.append(t); t.select();
     const ok = document.execCommand("copy"); t.remove(); return ok;
   }
+  // The link QuickBooks hands Claude when it makes an invoice opens a checkout that asks for a full billing address;
+  // the one Eduard copies inside QuickBooks asks for card and ZIP only, and can't be fetched, so he pastes it here.
+  main.addEventListener("click", async e => {
+    const p = e.target.closest("[data-paste]"); if (!p || !db) return;
+    const v = items.find(x => x.id === p.closest("[data-inv]").dataset.inv); if (!v) return;
+    let url = "";
+    try { url = (await navigator.clipboard.readText()).trim(); } catch {}
+    if (!/^https:\/\/connect\.intuit\.com\//.test(url)) url = (prompt(`Paste the link you copied in QuickBooks for invoice ${v.number} (${v.customer}):`) || "").trim();
+    if (!url) return;
+    if (!/^https:\/\/connect\.intuit\.com\//.test(url)) { alert("That doesn't look like a QuickBooks invoice link (it should start with https://connect.intuit.com/)."); return; }
+    await db.doc("invoices/" + v.id).update({share_link: url, link_from: "quickbooks_copy"});
+    p.textContent = "Saved";
+  });
   main.addEventListener("click", async e => {
     const b = e.target.closest("[data-copy]"); if (!b) return;
     const v = items.find(x => x.id === b.closest("[data-inv]").dataset.inv); if (!v) return;

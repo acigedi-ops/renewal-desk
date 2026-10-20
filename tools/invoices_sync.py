@@ -83,6 +83,9 @@ def main():
         # QuickBooks only returns the client link when an invoice is created; keep the one saved then.
         if not d["share_link"]:
             d["share_link"] = known.get(k, {}).get("share_link", "")
+        # Eduard's own link pasted in the Invoices tab (card-and-ZIP checkout) wins over the create_invoice one.
+        if known.get(k, {}).get("link_from"):
+            d["link_from"] = known[k]["link_from"]
         if not dry:
             set_doc("invoices", k, d)
     for k, old in known.items():
