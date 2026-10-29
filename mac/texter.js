@@ -10,7 +10,7 @@
 // - Reads ~/Library/Messages/chat.db read-only (needs Full Disk Access), never changes it.
 ObjC.import("Foundation");
 
-const VERSION = 14;
+const VERSION = 15;
 const SB_URL = "https://dapyzgcpzivaiiousifb.supabase.co";
 const SB_KEY = "sb_publishable_88FT9yvOdNhsr0TXETg8WQ_PooFMPlp"; // public by design, same as public/config.js
 const QUIET_FROM = 21, QUIET_UNTIL = 8;                           // local hours with no sending
@@ -576,6 +576,34 @@ function discover(){
   log(`discovery: ${blasts.length} group texts`);
 }
 
+// On request (qtaxmeta/recheck {requested_at, windows: [{from, to}], needles: [text]}): every text Eduard sent in those
+// windows whose body contains one of the needles, found through the conversation it sits in (so green SMS copies that
+// discover() missed count too). Writes who got it, never sends anything.
+function recheck(req){
+  const needles = (req.needles || []).map(x => String(x).toLowerCase()).filter(Boolean), found = {};
+  for (const w of (req.windows || []).slice(0, 12)){
+    const from = Date.parse(w.from), to = Date.parse(w.to);
+    if (!(from < to) || to - from > 5 * 864e5) continue;
+    chat(`SELECT m.ROWID AS id, COALESCE(h.id, h2.id) AS handle, ${MS} AS ms, m.text AS text, m.service AS svc,
+        CASE WHEN m.text IS NULL THEN hex(m.attributedBody) END AS body_hex
+      FROM message m JOIN chat_message_join cm ON cm.message_id = m.ROWID
+      LEFT JOIN handle h ON h.ROWID = m.handle_id
+      LEFT JOIN chat_handle_join j ON j.chat_id = cm.chat_id LEFT JOIN handle h2 ON h2.ROWID = j.handle_id
+      WHERE m.is_from_me = 1 AND m.associated_message_type = 0 AND ${MS} BETWEEN ${from} AND ${to}
+        AND (SELECT COUNT(*) FROM chat_handle_join j3 WHERE j3.chat_id = cm.chat_id) = 1`).forEach(r => {
+      const t = bodyText(r).toLowerCase(), d = last10(r.handle);
+      if (d.length < 10 || !needles.some(n => t.includes(n))) return;
+      const f = found[d] = found[d] || {phone: "+1" + d, at: [], svc: {}};
+      f.at.push(new Date(r.ms).toISOString().slice(0, 10)); f.svc[r.svc || "?"] = 1;
+    });
+  }
+  const names = contacts();
+  const list = Object.keys(found).map(d => ({phone: found[d].phone, name: names[d] || "",
+    dates: Array.from(new Set(found[d].at)).sort(), services: Object.keys(found[d].svc)}));
+  mergeDoc("qtaxmeta", "recheck", {done_at: nowIso(), found: list});
+  log(`recheck: ${list.length} people`);
+}
+
 // ---------- 5. On request: last week's conversations to a file on Eduard's Desktop (never to the database) ----------
 // Asked for by setting qtaxmeta/export {requested_at, days}. Lets Claude check for messages he never answered.
 const EXPORT_FILE = HOME + "/Desktop/Renewal Desk Texter/recent-texts.json";
@@ -781,6 +809,8 @@ function tick(){
       if (readJson(STATE, {}).last_scan_slot !== slot.id){ scanUnanswered(slot); writeJson(STATE, Object.assign(readJson(STATE, {}), {last_scan_slot: slot.id})); }
       const ex = getDoc("qtaxmeta", "export");
       if (ex && ex.requested_at && ex.requested_at > (ex.done_at || "")) exportRecent(ex);
+      const rc = getDoc("qtaxmeta", "recheck");
+      if (rc && rc.requested_at && rc.requested_at > (rc.done_at || "")) try { recheck(rc); } catch (e){ log("recheck: " + e.message); }
       const rs = getDoc("qtaxmeta", "responders");
       if (rs && rs.requested_at && rs.requested_at > (rs.scanned_at || "")) responders();
       if (!st.discovered_at || (d && d.requested_at && d.requested_at > (d.scanned_at || ""))){ discover(); writeJson(STATE, Object.assign(readJson(STATE, {}), {discovered_at: nowIso()})); }
