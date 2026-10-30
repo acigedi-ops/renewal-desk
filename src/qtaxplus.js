@@ -36,7 +36,9 @@
     const d = dueDate(k), n = daysTo(d);
     const active = people.filter(p => p.active !== false);
     const st = p => (p[qKey(k)] || {}).status || "";
-    const toFile = active.filter(p => st(p) === "received").length, waiting = active.filter(p => st(p) === "asked").length;
+    // Same people as the "Sent you income · to file" card in qtax.js: replied, or the Mac read income from their texts.
+    const sent = p => { const a = amounts[`${p.id}_${k}`] || {}; return st(p) === "received" || ["unconfirmed", "confirmed", "unclear"].includes(a.reported_status) || (a.income !== undefined && a.income !== ""); };
+    const toFile = active.filter(p => !["filed", "paid"].includes(st(p)) && sent(p)).length, waiting = active.filter(p => st(p) === "asked" && !sent(p)).length;
     const done = active.filter(p => ["filed", "paid"].includes(st(p))).length;
     const when = d.toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric", year: "numeric"});
     const left = n < 0 ? `${-n} day${n === -1 ? "" : "s"} ago` : n === 0 ? "today" : `in ${n} day${n === 1 ? "" : "s"}`;

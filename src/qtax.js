@@ -107,14 +107,14 @@
     if (!force && root.contains(document.activeElement) && document.activeElement.matches("input,textarea")) return; // don't wipe typing
     const active = clients.filter(textable);
     const st = c => qOf(c).status || "";
-    const n = {none: active.filter(c => !st(c)).length, asked: active.filter(c => st(c) === "asked").length,
-      received: active.filter(c => st(c) === "received").length, done: active.filter(c => ["filed", "paid"].includes(st(c))).length};
+    const n = {none: active.filter(c => !st(c) && !sentIncome(c)).length, asked: active.filter(c => st(c) === "asked").length,
+      received: toFile().length, done: active.filter(c => ["filed", "paid"].includes(st(c))).length};
     const quarters = [filingQuarter(new Date(Date.now() + 40 * 864e5)), filingQuarter()];
     while (quarters.length < 5) quarters.push(prevQuarter(quarters.at(-1)));
     const qs = [...new Set(quarters)];
     const search = (q("#qq")?.value || "").trim().toLowerCase();
-    const removedOpen = !!q("#qRemoved")?.open, draftsOpen = q("#qDrafts") ? q("#qDrafts").open : true;
-    const shown = clients.filter(c => !filter || (filter === "none" ? !st(c) && c.active !== false : filter === "done" ? ["filed", "paid"].includes(st(c)) : st(c) === filter))
+    const removedOpen = !!q("#qRemoved")?.open, draftsOpen = q("#qDrafts") ? q("#qDrafts").open : true, doneOpen = !!q("#qDone")?.open;
+    const shown = clients.filter(c => !filter || (filter === "none" ? !st(c) && c.active !== false && !sentIncome(c) : filter === "done" ? ["filed", "paid"].includes(st(c)) : filter === "received" ? c.active !== false && !filedSt(c) && sentIncome(c) : st(c) === filter))
       .filter(c => !search || String(c.name || "").toLowerCase().includes(search) || (digits(search) && digits(c.phone).includes(digits(search))))
       .sort((a, b) => (a.active === false) - (b.active === false) || String(a.name).localeCompare(String(b.name)));
     root.innerHTML = `
@@ -130,8 +130,8 @@
     </div>
     ${macLine()}
   </header>
+  ${incomeCard(doneOpen)}
   ${adding ? addForm() : ""}
-  ${incomeCard()}
   ${removedCard(removedOpen)}
   ${silentCard(active)}
   ${draftCards(active, draftsOpen)}
@@ -180,21 +180,43 @@
   const usd = n => "$" + Number(n).toLocaleString("en-US", Number.isInteger(+n) ? {} : {minimumFractionDigits: 2, maximumFractionDigits: 2});
   const toCheck = () => amounts.filter(a => a.quarter === quarter && (a.reported_status === "unconfirmed" || a.reported_status === "unclear"))
     .sort((a, b) => (a.reported_status === "unclear") - (b.reported_status === "unclear") || String(a.name).localeCompare(String(b.name)));
-  function incomeCard(){
-    const list = toCheck(); if (!list.length) return "";
-    const ok = list.filter(a => a.reported_status === "unconfirmed").length;
-    return `<section class="card"><h3><span>Income clients texted you <span class="chip info">${list.length} to check</span></span>
-        ${ok > 1 ? `<span><button class="btn primary" data-qincall type="button">All ${ok} look right</button></span>` : ""}</h3>
-      ${list.some(a => a.reported_early && a.reported_status === "unconfirmed") ? `<span class="notice"><b>Sent before you asked:</b> they won't get the quarter text. If one isn't really their income, tap "Not income, text them".</span>` : ""}
-      <span class="notice">Your Mac read these amounts from their replies. Check each against their words, then tap Looks right. Nothing is filed or saved as their income until you do.</span>
-      <div class="list">${list.map(a => { const c = clients.find(x => x.id === a.client_id) || {}, sure = a.reported_status === "unconfirmed";
-        return `<div class="qrow" data-qinc="${h(a.id)}"><div><span class="name">${h(c.name || a.name || phoneFmt(c.phone))}</span>
-          ${sure ? ` <b style="color:var(--ok)">${usd(a.reported_income)}</b>` : ` <span class="chip amber">Couldn't read an amount: ${h(a.reported_why || "check it")}</span>`}
-          ${a.reported_early ? ` <span class="chip info">Sent before you asked</span>` : ""}
-          <div class="meta">texted ${day(a.reported_at)}</div>${a.reported_text ? `<div class="reply">${h(String(a.reported_text).slice(0, 300))}</div>` : ""}${pics(a)}</div>
-          <div class="acts">${sure ? `<button class="btn primary" data-qincok type="button">Looks right</button><button class="btn ghost" data-qincedit type="button">Change</button>`
-            : `<button class="btn primary" data-qincedit type="button">Enter amount</button><button class="btn ghost" data-qincskip type="button">Not income</button>`}
-            ${sure && a.reported_early ? `<button class="btn ghost" data-qincskip type="button">Not income, text them</button>` : ""}</div></div>`; }).join("")}</div></section>`;
+  // "Sent you income" (Eduard, 2026-10-30: he couldn't see who had sent income and still needed filing, and wanted one Done button).
+  // One list of everyone whose income is in for the quarter and isn't filed yet: they replied ("Got income"), or the Mac read an
+  // amount from their texts (even unasked). Amounts the Mac read still need his check here; Done files them in one tap and can be undone.
+  const filedSt = c => ["filed", "paid"].includes(qOf(c).status || "");
+  const sentIncome = c => qOf(c).status === "received" || haveIncome(c) || amountOf(c)?.reported_status === "unclear";
+  const toFile = () => clients.filter(c => c.active !== false && !filedSt(c) && sentIncome(c));
+  const doneList = () => clients.filter(c => filedSt(c) && (qOf(c).filed_at || qOf(c).paid_at)).sort((a, b) => String(qOf(b).filed_at || qOf(b).paid_at).localeCompare(String(qOf(a).filed_at || qOf(a).paid_at)));
+  const hasAmt = a => !!a && a.income !== undefined && a.income !== "";
+  // 0 = amount checked, ready to file; 1 = the Mac read an amount, check it; 2 = no amount yet.
+  const rank = c => { const a = amountOf(c); return hasAmt(a) ? 0 : a?.reported_status === "unconfirmed" ? 1 : 2; };
+  function incomeCard(doneOpen){
+    const list = toFile().sort((a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)));
+    const done = doneList(), ok = toCheck().filter(a => a.reported_status === "unconfirmed").length;
+    if (!list.length && !done.length) return "";
+    const ready = list.filter(c => rank(c) === 0).length;
+    const one = c => { const a = amountOf(c), s = qOf(c), r = rank(c);
+      const words = a?.reported_text || s.reply || (s.asked_at && c.last_reply?.at > s.asked_at ? c.last_reply.text : "");
+      const when = a?.reported_at || s.received_at;
+      return `<div class="qrow" data-qtf="${h(c.id)}" ${a ? `data-qinc="${h(a.id)}"` : ""}><div><span class="name">${h(c.name || phoneFmt(c.phone))}</span>
+        ${r === 0 ? ` <b style="color:var(--ok)">${usd(a.income)}</b>` : r === 1 ? ` <b>${usd(a.reported_income)}</b> <span class="chip amber">check amount</span>`
+          : ` <span class="chip amber">${a?.reported_why ? `No amount: ${h(a.reported_why)}` : "No amount yet"}</span>`}
+        ${a?.reported_early ? ` <span class="chip info">Sent before you asked</span>` : ""}
+        <div class="meta">${h([phoneFmt(c.phone), when && `sent ${day(when)}`].filter(Boolean).join(" · "))}</div>
+        ${words ? `<div class="reply">${h(String(words).slice(0, 300))}</div>` : ""}${a ? pics(a) : ""}</div>
+        <div class="acts">${r === 1 ? `<button class="btn ghost" data-qincok type="button">Looks right</button><button class="btn ghost" data-qincedit type="button">Change</button>` : ""}
+          ${r === 2 ? `<button class="btn ghost" data-qincedit type="button">Enter amount</button>` : ""}
+          ${r === 2 && a?.reported_status === "unclear" && !s.status ? `<button class="btn ghost" data-qincskip type="button">Not income</button>` : ""}
+          ${r === 1 && a?.reported_early ? `<button class="btn ghost" data-qincskip type="button">Not income, text them</button>` : ""}
+          <button class="btn primary" data-qdone type="button" aria-label="Done: filed for ${h(c.name)}">Done</button></div></div>`; };
+    return `<section class="card" id="qToFile"><h3><span>Sent you income · to file <span class="chip red">${list.length}</span></span>
+        ${ok > 1 ? `<span><button class="btn" data-qincall type="button">All ${ok} amounts look right</button></span>` : ""}</h3>
+      <span class="notice">${list.length ? `${ready} ready to file${list.length > ready ? ` · ${list.length - ready} need the amount checked or typed in` : ""}. Tap <b>Done</b> when you've filed one and it moves to Done below.` : `Nobody is waiting. Everyone who sent income for ${qLabel(quarter)} is done.`}</span>
+      ${list.length ? `<div class="list">${list.map(one).join("")}</div>` : ""}
+      ${done.length ? `<details id="qDone" ${doneOpen ? "open" : ""} style="margin-top:8px"><summary style="cursor:pointer"><b>Done</b> <span class="chip ok">${done.length}</span> <span class="notice">${qLabel(quarter)} · tap to see or undo</span></summary>
+        <div class="list">${done.map(c => { const a = amountOf(c), s = qOf(c); return `<div class="qrow off" data-qtf="${h(c.id)}"><div><span class="name">${h(c.name || phoneFmt(c.phone))}</span>${hasAmt(a) ? ` <b>${usd(a.income)}</b>` : ""}
+          <div class="meta">${s.status === "paid" ? `paid ${day(s.paid_at)}` : `done ${day(s.filed_at)}`}</div></div>
+          <div class="acts"><button class="btn ghost" data-qundone type="button">Undo</button></div></div>`; }).join("")}</div></details>` : ""}</section>`;
   }
   // Statement screenshots and PDFs they sent (reported_files, uploaded by the Mac). The bucket is private, so images are
   // fetched through the signed-link fetch in shim.js and shown from memory; a tap opens the full file.
@@ -258,7 +280,7 @@
         <div class="list">${all.map(one).join("")}</div>` : `<div class="empty">No drafts. Your Mac drafts the quarter text for every client on the first day of each quarter.</div>`}
       <div class="actions" style="margin-top:8px">
         ${notAsked.length ? `<button class="btn" id="qDraftAll" type="button">Draft ${qLabel(quarter)} text for ${notAsked.length} more</button>` : ""}
-        ${already.length ? `<span class="notice">${already.length} already sent you their income, so they're left out (see "Income clients texted you").</span>` : ""}
+        ${already.length ? `<span class="notice">${already.length} already sent you their income, so they're left out (see "Sent you income").</span>` : ""}
         ${waiting.length ? `<button class="btn" id="qDraftFup" type="button">Draft reminders for ${waiting.length} not answered</button>` : ""}</div></details>`;
   }
 
@@ -318,6 +340,19 @@
         const v = prompt(`Income for ${a.name || "this client"} (${qLabel(quarter)}):`, a.reported_income === "" ? "" : a.reported_income); if (v === null) return;
         const n = +String(v).replace(/[^\d.]/g, ""); if (String(v).trim() === "" || isNaN(n)) return alert("Type a number, for example 15000.");
         return confirmIncome(a, n);
+      }
+      const tf = t.closest("[data-qtf]"), fc = tf && clients.find(x => x.id === tf.dataset.qtf);
+      if (fc && t.closest("[data-qdone]")){
+        t.disabled = true;
+        // Filing with an amount the Mac read counts as checking it.
+        if (a && a.reported_status === "unconfirmed" && !hasAmt(a)) await db.doc("qtaxq/" + a.id).update({income: a.reported_income, reported_status: "confirmed", confirmed_at: new Date().toISOString()});
+        const s = qOf(fc);
+        return db.doc("qtax/" + fc.id).update({[qKey(quarter)]: {...s, status: "filed", filed_at: new Date().toISOString(), received_at: s.received_at || a?.reported_at || new Date().toISOString()}});
+      }
+      if (fc && t.closest("[data-qundone]")){
+        t.disabled = true;
+        const {filed_at, paid_at, ...s} = qOf(fc);
+        return db.doc("qtax/" + fc.id).update({[qKey(quarter)]: {...s, status: "received"}});
       }
       if (t.closest("[data-qincall]")){
         const list = toCheck().filter(x => x.reported_status === "unconfirmed");
