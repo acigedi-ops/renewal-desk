@@ -12,12 +12,13 @@
     outbox: '<path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
     tasks: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 6 1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17"/>',
     invoices: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+    policies: '<rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     agency: '<path d="M4 20V8l8-4 8 4v12"/><path d="M9 20v-6h6v6"/>'
   };
   const LBL = {today: "Today", tasks: "To do", todo: "Licenses", ren: "Renewals", desk: "Clients"};
   const num = id => (String(q("#" + id)?.textContent || "").match(/\d+/) || [""])[0];
 
-  const TITLE = {todo: "L&I licenses", ren: "Renewals", desk: "Clients", inbox: "Email", outbox: "Email", email: "Email", tasks: "To do", invoices: "Invoices"};
+  const TITLE = {todo: "L&I licenses", ren: "Renewals", desk: "Clients", inbox: "Email", outbox: "Email", email: "Email", tasks: "To do", invoices: "Invoices", policies: "All policies"};
   // Large title: a greeting on Today, the tab's name everywhere else.
   function hello(){
     const b = q("#policyMode .brand"); if (!b) return;
@@ -66,7 +67,7 @@
       document.body.append(s);
     }
     const row = (k, label, to, n) => q(to) ? `<button class="it" data-to="${to}">${svg(IC[k])}${label}${n ? `<span class="n">${n}</span>` : ""}</button>` : "";
-    s.innerHTML = `<div><div class="grab"></div><div class="grp">${row("inbox", "Email", "#tab-email", (+num("inboxN") || 0) + (+num("outboxN") || 0) || "")}${row("invoices", "Invoices", "#tab-invoices", num("invoicesN"))}${row("agency", "Agency details", "#agencyBtn", "")}</div></div>`;
+    s.innerHTML = `<div><div class="grab"></div><div class="grp">${row("policies", "All policies", "#tab-policies", "")}${row("inbox", "Email", "#tab-email", (+num("inboxN") || 0) + (+num("outboxN") || 0) || "")}${row("invoices", "Invoices", "#tab-invoices", num("invoicesN"))}${row("agency", "Agency details", "#agencyBtn", "")}</div></div>`;
     s.hidden = false;
   }
   const run = () => { hello(); decorate(); };

@@ -31,7 +31,7 @@ const split = pre.indexOf("</style>") + "</style>".length;
 // The phone layout (src/mobile.css, plus src/mobile.js for the hide-on-scroll header) is linked after them so it wins over every other stylesheet, including the ones those scripts add.
 // Getting around (src/nav.css + src/nav.js: Today as home, the Email page, client-card links) is loaded after the look.
 // The white premium look (src/look.css + src/look.js: bottom tab bar, More sheet, greeting) comes last of all; data-theme="light" keeps it white when the phone is in dark mode.
-const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n<script src="/qtaxplus.js"></script>\n<script src="/tasks.js"></script>\n<script src="/invoices.js"></script>\n<script src="/health.js"></script>\n<script src="/timeline.js"></script>\n<script src="/clientdocs.js"></script>\n<script src="/search.js"></script>\n<script src="/mobile.js"></script>\n<link rel="stylesheet" href="/mobile.css">\n<link rel="stylesheet" href="/look.css">\n<script src="/look.js"></script>\n<link rel="stylesheet" href="/nav.css">\n<script src="/nav.js"></script>\n</body></html>\n';
+const html = head + pre.slice(0, split) + "\n</head><body>\n" + pre.slice(split) + boot + rest + '\n<script src="/outbox.js"></script>\n<script src="/qtax.js"></script>\n<script src="/qtaxplus.js"></script>\n<script src="/tasks.js"></script>\n<script src="/invoices.js"></script>\n<script src="/policies.js"></script>\n<script src="/health.js"></script>\n<script src="/timeline.js"></script>\n<script src="/clientdocs.js"></script>\n<script src="/search.js"></script>\n<script src="/mobile.js"></script>\n<link rel="stylesheet" href="/mobile.css">\n<link rel="stylesheet" href="/look.css">\n<script src="/look.js"></script>\n<link rel="stylesheet" href="/nav.css">\n<script src="/nav.js"></script>\n</body></html>\n';
 
 mkdirSync("dist", {recursive: true});
 cpSync("public", "dist", {recursive: true});
@@ -40,7 +40,7 @@ cpSync("src/outbox.js", "dist/outbox.js");
 cpSync("src/qtax.js", "dist/qtax.js");
 cpSync("src/tasks.js", "dist/tasks.js");
 cpSync("src/health.js", "dist/health.js");
-for (const f of ["invoices.js", "qtaxplus.js", "timeline.js", "clientdocs.js", "search.js"]) cpSync("src/" + f, "dist/" + f);
+for (const f of ["invoices.js", "policies.js", "qtaxplus.js", "timeline.js", "clientdocs.js", "search.js"]) cpSync("src/" + f, "dist/" + f);
 cpSync("src/mobile.css", "dist/mobile.css");
 cpSync("src/mobile.js", "dist/mobile.js");
 for (const f of ["look.css", "look.js", "nav.css", "nav.js"]) cpSync("src/" + f, "dist/" + f);

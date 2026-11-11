@@ -2,13 +2,16 @@
 
 /* Tab order: To do right after Today, on the computer and in the phone's bottom bar. */
 .bar .tabs > #tab-today{order:1}.bar .tabs > #tab-tasks{order:2}.bar .tabs > #tab-todo{order:3}.bar .tabs > #tab-ren{order:4}
-.bar .tabs > #tab-desk{order:5}.bar .tabs > #tab-email{order:6}.bar .tabs > #tab-invoices{order:7}.bar .tabs > .rd-more{order:9}
+.bar .tabs > #tab-desk{order:5}.bar .tabs > #tab-policies{order:6}.bar .tabs > #tab-email{order:7}.bar .tabs > #tab-invoices{order:8}.bar .tabs > .rd-more{order:9}
 /* Inbox and Outbox are one page now, opened by the Email tab. */
 .bar .tabs > #tab-inbox,.bar .tabs > #tab-outbox{display:none!important}
+@media (min-width:601px){.bar .tabs > button{padding-inline:10px}#policiesN{display:none}}
 html.rd-email #inbox[hidden]{display:block!important;margin-top:8px}
 
 /* The filter under the title only works on Licenses, Renewals and Clients, so it only shows there. */
 html[data-rd-tab]:not([data-rd-tab="todo"]):not([data-rd-tab="ren"]):not([data-rd-tab="desk"]) #q{display:none!important}
+/* "+ Client" belongs to the client list. */
+html[data-rd-tab]:not([data-rd-tab="desk"]) #addBtn{display:none!important}
 /* The three counts filter the client list, so they sit on Clients only. Today has "Waiting on you" instead. */
 html[data-rd-tab="today"] #policyMode .tiles{display:none!important}
 /* The app's own "Waiting on you" buttons at the bottom of Today are replaced by the card at the top. */
@@ -43,7 +46,6 @@ html[data-rd-tab="today"] #policyMode .tiles{display:none!important}
   #policyMode .brand h1{display:none!important}
   #policyMode header.top{padding-top:4px!important;gap:6px!important}
   .rd-hello{font-size:26px}
-  html:not([data-rd-tab="desk"]) #addBtn{display:none!important}
   html[data-rd-tab]:not([data-rd-tab="todo"]):not([data-rd-tab="ren"]):not([data-rd-tab="desk"]) #policyMode .bar{display:contents}
   /* Clients: the three counts on one short row. */
   #policyMode .tiles{grid-template-columns:repeat(3,1fr)!important;padding:10px 14px!important;border-radius:18px}
@@ -54,7 +56,9 @@ html[data-rd-tab="today"] #policyMode .tiles{display:none!important}
   .section-h{margin-top:18px!important}
   /* Bottom bar: Today, To do, Licenses, Renewals, Clients, More. Email and Invoices are under More. */
   .bar .tabs > #tab-tasks{display:grid!important}
-  .bar .tabs > #tab-email,.bar .tabs > #tab-invoices{display:none!important}
+  .bar .tabs > #tab-email,.bar .tabs > #tab-invoices,.bar .tabs > #tab-policies{display:none!important}
+  .bar .tabs:has(#tab-policies[aria-selected="true"]) .rd-more{color:var(--ink)!important}
+  .bar .tabs:has(#tab-policies[aria-selected="true"]) .rd-more .rd-ic{background:var(--brand);color:#0B0B0F}
   .rd-ic{width:46px}
   .bar .tabs > button{font-size:10px!important}
   .bar .tabs:has(#tab-tasks[aria-selected="true"]) .rd-more{color:var(--muted)!important}
