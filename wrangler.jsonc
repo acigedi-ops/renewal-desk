@@ -1,6 +1,6 @@
 // Lets Cloudflare deploy this with no settings typed in: `npx wrangler deploy` runs the build, then uploads dist/.
 // Files in dist/ are served directly; anything else (only /api/outbox/send, the Outbox "Approve & send") reaches worker/index.js.
-// Secret, set in the Cloudflare dashboard and never in this repo: GMAIL_APP_PASSWORD (Gmail app password for GMAIL_USER).
+// Secrets, set in the Cloudflare dashboard and never in this repo: GMAIL_APP_PASSWORD (Gmail app password for GMAIL_USER) and ANTHROPIC_API_KEY (the Assistant chat).
 {
   "name": "renewal-desk",
   "main": "worker/index.js",
