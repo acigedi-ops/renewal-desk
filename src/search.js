@@ -1,4 +1,4 @@
-// Universal search: one box that finds a client, SOS business, Qtax person, to-do, Outbox email or document
+// Universal search: one box that finds a client, SOS business, Qtax person, to-do, email (waiting or received), invoice or document
 // by name, phone, email, license, UBI, policy number or certificate holder. A magnifier button next to Policies / SOS / Qtax
 // (or the "/" key) opens it in the side sheet; tapping a result jumps to it.
 // Kept out of src/app.html, which the L&I routine overwrites; build.mjs loads this after the app. It only reads.
@@ -7,7 +7,7 @@
   const h = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const low = s => String(s ?? "").toLowerCase();
   const dig = s => String(s ?? "").replace(/\D/g, "");
-  const data = {clients: [], sos: [], qtax: [], tasks: [], outbox: [], files: []};
+  const data = {clients: [], sos: [], qtax: [], tasks: [], outbox: [], files: [], invoices: [], mail: []};
   const LIMIT = 8;
   let open = false;
 
@@ -49,8 +49,14 @@
       out.push({group: "To do", title: k.title || k.who, sub: [k.who, k.status === "done" ? "done" : "open"].filter(Boolean).join(" · "),
         go: () => { q('[data-mode="policies"]')?.click(); q("#tab-tasks")?.click(); setTimeout(() => q(`[data-task="${CSS.escape(k.id)}"]`)?.scrollIntoView({block: "center"}), 80); }});
     for (const o of data.outbox) if (has([o.subject, o.client_name, ...(o.to || [])]))
-      out.push({group: "Outbox", title: o.subject, sub: [o.client_name, o.status].filter(Boolean).join(" · "),
+      out.push({group: "Email to send", title: o.subject, sub: [o.client_name, o.status].filter(Boolean).join(" · "),
         go: () => { q('[data-mode="policies"]')?.click(); q("#tab-outbox")?.click(); }});
+    for (const m of data.mail) if (m.status !== "dismissed" && has([m.subject, m.client, m.from, m.summary]))
+      out.push({group: "Email received", title: m.subject, sub: [m.client, m.from].filter(Boolean).join(" · "),
+        go: () => { q('[data-mode="policies"]')?.click(); q("#tab-outbox")?.click(); setTimeout(() => q(`[data-mail="${CSS.escape(m.id)}"]`)?.scrollIntoView({block: "center"}), 120); }});
+    for (const v of data.invoices) if (has([v.customer, v.number, v.description]))
+      out.push({group: "Invoices", title: `${v.customer || ""} · invoice ${v.number || ""}`, sub: [v.description, v.status === "paid" ? "paid" : "not paid"].filter(Boolean).join(" · "),
+        go: () => { q('[data-mode="policies"]')?.click(); q("#tab-invoices")?.click(); setTimeout(() => q(`[data-inv="${CSS.escape(v.id)}"]`)?.scrollIntoView({block: "center"}), 120); }});
     return out;
   }
 

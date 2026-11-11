@@ -14,10 +14,10 @@
     invoices: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
     agency: '<path d="M4 20V8l8-4 8 4v12"/><path d="M9 20v-6h6v6"/>'
   };
-  const LBL = {today: "Today", todo: "Licenses", ren: "Renewals", desk: "Clients"};
+  const LBL = {today: "Today", tasks: "To do", todo: "Licenses", ren: "Renewals", desk: "Clients"};
   const num = id => (String(q("#" + id)?.textContent || "").match(/\d+/) || [""])[0];
 
-  const TITLE = {todo: "L&I licenses", ren: "Renewals", desk: "Clients", inbox: "Inbox", outbox: "Outbox", tasks: "To do", invoices: "Invoices"};
+  const TITLE = {todo: "L&I licenses", ren: "Renewals", desk: "Clients", inbox: "Email", outbox: "Email", email: "Email", tasks: "To do", invoices: "Invoices"};
   // Large title: a greeting on Today, the tab's name everywhere else.
   function hello(){
     const b = q("#policyMode .brand"); if (!b) return;
@@ -42,7 +42,7 @@
     }
     badges();
   }
-  // Short labels and count bubbles on the phone bar; the app's own "(n)" text stays for desktop.
+  // Short labels and count bubbles on the phone bar (To do sits in the bar; Email and Invoices are under More); the app's own "(n)" text stays for desktop.
   function badges(){
     const phone = matchMedia("(max-width:600px)").matches;
     for (const k of Object.keys(LBL)){
@@ -54,7 +54,7 @@
       if (phone && n && n !== "0"){ if (!bd){ bd = document.createElement("span"); bd.className = "rd-badge"; b.append(bd); } if (bd.textContent !== n) bd.textContent = n; } else bd?.remove();
     }
     const more = q(".rd-more"); if (!more) return;
-    const total = ["inboxN", "outboxN", "tasksN"].reduce((s, id) => s + (+num(id) || 0), 0);
+    const total = ["inboxN", "outboxN"].reduce((s, id) => s + (+num(id) || 0), 0);
     let bd = more.querySelector(".rd-badge");
     if (total){ if (!bd){ bd = document.createElement("span"); bd.className = "rd-badge"; more.append(bd); } if (bd.textContent !== String(total)) bd.textContent = total; } else bd?.remove();
   }
@@ -66,7 +66,7 @@
       document.body.append(s);
     }
     const row = (k, label, to, n) => q(to) ? `<button class="it" data-to="${to}">${svg(IC[k])}${label}${n ? `<span class="n">${n}</span>` : ""}</button>` : "";
-    s.innerHTML = `<div><div class="grab"></div><div class="grp">${row("inbox", "Inbox", "#tab-inbox", num("inboxN"))}${row("outbox", "Outbox", "#tab-outbox", num("outboxN"))}${row("tasks", "To do", "#tab-tasks", num("tasksN"))}${row("invoices", "Invoices", "#tab-invoices", num("invoicesN"))}${row("agency", "Agency details", "#agencyBtn", "")}</div></div>`;
+    s.innerHTML = `<div><div class="grab"></div><div class="grp">${row("inbox", "Email", "#tab-email", (+num("inboxN") || 0) + (+num("outboxN") || 0) || "")}${row("invoices", "Invoices", "#tab-invoices", num("invoicesN"))}${row("agency", "Agency details", "#agencyBtn", "")}</div></div>`;
     s.hidden = false;
   }
   const run = () => { hello(); decorate(); };

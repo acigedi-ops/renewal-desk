@@ -94,7 +94,7 @@ html[data-rd-tab]:not([data-rd-tab="today"]):not([data-rd-tab="desk"]) #policyMo
     padding:6px 6px calc(env(safe-area-inset-bottom,0px) + 6px)!important;background:var(--glass)!important;-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border-top:.5px solid var(--line);gap:0!important;overflow:visible!important;max-width:none!important}
   .bar .tabs > button{flex:1 1 0!important;display:grid!important;justify-items:center;gap:3px;background:none!important;box-shadow:none!important;padding:2px 0!important;min-height:0!important;font-size:10.5px!important;font-weight:600!important;color:var(--muted)!important;position:relative}
   .bar .tabs > button > span[id]{display:none}
-  .bar .tabs > #tab-inbox,.bar .tabs > #tab-outbox,.bar .tabs > #tab-tasks,.bar .tabs > #tab-invoices{display:none!important}
+  .bar .tabs > #tab-inbox,.bar .tabs > #tab-outbox,.bar .tabs > #tab-invoices{display:none!important}
   .rd-ic{width:56px;height:30px;border-radius:999px;display:grid;place-items:center}
   .rd-ic svg{width:23px;height:23px}
   .bar .tabs > button[aria-selected="true"],.bar .tabs:has(#tab-inbox[aria-selected="true"],#tab-outbox[aria-selected="true"],#tab-tasks[aria-selected="true"],#tab-invoices[aria-selected="true"]) .rd-more{color:var(--ink)!important}
