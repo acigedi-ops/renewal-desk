@@ -1106,11 +1106,18 @@ function sosOpen(id){
   $("#sosClose").onclick = sosClose;
   const save = async (patch, msg) => {
     try { await sosDb.doc("sos/" + id).update(patch); if (msg) msg.textContent = "Saved"; }
-    catch(e){ if (msg) msg.textContent = e.code === "invalid_argument" ? "You have view-only access." : "Could not save. Try again."; } };
+    catch(e){ if (msg) msg.textContent = "Could not save. Check your connection and try again."; return false; } return true; };
   $("#sosFu").onsubmit = e => { e.preventDefault(); const u = $("#sf-ubi").value.replace(/\D/g, "");
     if (u && u.length !== 9){ $("#sfMsg").textContent = "A UBI has 9 digits."; return; }
     save({followup: {status: $("#sf-status").value, date: $("#sf-date").value}, ubi: u}, $("#sfMsg")); };
-  $("#sosNoteF").onsubmit = e => { e.preventDefault(); const t = $("#sn-text").value.trim(); if (t) save({notes: [...(b.notes || []), {at: new Date().toISOString(), text: t}]}); };
+  // Adds to the notes saved right now (not the copy on screen), then clears the box and shows the note, so it isn't added twice.
+  $("#sosNoteF").onsubmit = async e => { e.preventDefault(); const t = $("#sn-text").value.trim(), btn = e.submitter; if (!t) return;
+    if (btn) btn.disabled = true;
+    let cur = b.notes || [];
+    try { const snap = await sosDb.doc("sos/" + id).get(); if (snap.exists) cur = snap.data().notes || []; } catch {}
+    const ok = await save({notes: [...cur, {at: new Date().toISOString(), text: t}]});
+    if (btn) btn.disabled = false;
+    if (ok){ document.activeElement?.blur(); if (sosOpenId === id) sosOpen(id); } else if (btn) btn.textContent = "Could not save. Try again"; };
   $("#sosDel").onclick = async e => { const x = e.currentTarget;
     if (x.dataset.confirm !== "1"){ x.dataset.confirm = "1"; x.textContent = "Tap again to remove"; return; }
     try { await sosDb.doc("sos/" + id).delete(); sosClose(); } catch { x.textContent = "Could not remove"; } };
@@ -1129,7 +1136,7 @@ function sosOpenAdd(){
   $("#sosAddF").onsubmit = async e => { e.preventDefault();
     const name = $("#sa-name").value.trim().toUpperCase(), ubi = $("#sa-ubi").value.replace(/\D/g, ""), id = sosId(ubi, name);
     if (ubi && ubi.length !== 9){ $("#saMsg").textContent = "A UBI has 9 digits."; return; }
-    if (!sosDb){ $("#saMsg").textContent = "Saving is unavailable in this view."; return; }
+    if (!sosDb){ $("#saMsg").textContent = "Not connected. Reload the page."; return; }
     if (sosRows.some(b => b.id === id)){ $("#saMsg").textContent = "That business is already on the list."; return; }
     try { await sosDb.doc("sos/" + id).set({ubi, name, source: "manual", added_at: new Date().toISOString(), followup: {status: "", date: ""}, notes: []}); sosOpen(id); }
     catch { $("#saMsg").textContent = "Could not add. Try again."; } };
